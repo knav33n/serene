@@ -1,0 +1,24 @@
+# Backtest on synthetic data. Generate it first:
+#   calm research synth --from 2026-08-03 --to 2026-11-30
+strategy: short_straddle
+underlying: NIFTY
+from: "2026-08-03"
+to: "2026-11-30"
+capital: 1000000
+data_dir: data/synthetic
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  entry_minute: 15 # minutes after 09:15
+  exit_minute: 360 # 15:15
+  stop_pct: 30
+  lots: 1
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12 # of index notional; an estimate, not SPAN

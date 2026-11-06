@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb; --surface-2: #f3f2ef; --line: #e2e1dc;
+  --text: #0b0b0b; --text-2: #52514e;
+  --series: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #1a1a19; --surface-2: #262625; --line: #3a3a38;
+    --text: #f0efec; --text-2: #c3c2b7;
+    --series: #3987e5;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 26px; margin: 0; }
+h2 { font-size: 17px; margin: 36px 0 10px; }
+.sub, .note { color: var(--text-2); }
+.note { font-size: 13px; margin: 6px 0 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 20px; }
+.tile { background: var(--surface-2); border-radius: 8px; padding: 12px 14px; }
+.tile b { display: block; font-size: 21px; font-variant-numeric: tabular-nums; }
+.tile span { color: var(--text-2); font-size: 13px; }
+.tiles.small .tile b { font-size: 16px; }
+.chart { position: relative; }
+svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+#tip { position: absolute; display: none; pointer-events: none; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px;
+  white-space: nowrap; font-variant-numeric: tabular-nums; z-index: 2; }
+.wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--text-2); font-weight: 500; }
+.loss::before { content: "▼ "; font-size: 10px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--text-2); }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{.Title}}</h1>
+  <p class="sub">{{.Subtitle}}</p>
+
+  <div class="tiles">{{range .Tiles}}<div class="tile"><b>{{.Value}}</b><span>{{.Label}}</span></div>{{end}}</div>
+
+  <h2>Equity at each day's close</h2>
+  <div class="chart" id="equity"><div id="tip"></div></div>
+
+  <h2>Drawdown from peak, daily closes</h2>
+  <div class="chart" id="drawdown"></div>
+  <p class="note">The max drawdown tile is measured every minute, so it can be larger than this chart shows.</p>
+
+  {{if .Slip}}
+  <h2>Sensitivity to slippage</h2>
+  <div class="wrap"><table>
+    <tr><th>Slippage</th><th>Net P&amp;L</th><th>Sharpe</th><th>Max drawdown</th></tr>
+    {{range .Slip}}<tr><td>{{.Multiple}}</td><td {{if .Loss}}class="loss"{{end}}>{{.Net}}</td><td>{{.Sharpe}}</td><td>{{.MaxDD}}</td></tr>{{end}}
+  </table></div>
+  <p class="note">Bar data has no bid/ask, so fills are an assumption. Trust a result only if it survives the higher rows.</p>
+  {{end}}
+
+  <h2>Detail</h2>
+  <div class="tiles small">{{range .Quality}}<div class="tile"><b>{{.Value}}</b><span>{{.Label}}</span></div>{{end}}</div>
+
+  <details>
+    <summary>Daily equity table</summary>
+    <div class="wrap"><table>
+      <tr><th>Date</th><th>Equity (₹)</th><th>Drawdown (₹)</th></tr>
+      {{range .Points}}<tr><td>{{.Date}}</td><td>{{printf "%.2f" .Equity}}</td><td>{{printf "%.2f" .Drawdown}}</td></tr>{{end}}
+    </table></div>
+  </details>
+
+  <h2>Trades</h2>
+  {{if .Hidden}}<p class="note">Showing the latest 1,000 legs; {{.Hidden}} earlier legs are omitted.</p>{{end}}
+  <div class="wrap"><table>
+    <tr><th>Tag</th><th>Contract</th><th>Side</th><th>Qty</th><th>Entry</th><th>Price</th><th>Exit</th><th>Price</th><th>How</th><th>Net</th></tr>
+    {{range .Trades}}<tr><td>{{.Tag}}</td><td>{{.Key}}</td><td>{{.Side}}</td><td>{{.Qty}}</td><td>{{.Entry}}</td><td>{{printf "%.2f" .EntryPrice}}</td><td>{{.Exit}}</td><td>{{printf "%.2f" .ExitPrice}}</td><td>{{.How}}</td><td {{if .Loss}}class="loss"{{end}}>{{.Net}}</td></tr>{{end}}
+  </table></div>
+</main>
+<script>
+const points = {{.Points}} || [];
+const inr = v => "₹" + Math.round(v).toLocaleString("en-IN");
+const NS = "http://www.w3.org/2000/svg";
+const el = (name, attrs, parent) => {
+  const n = document.createElementNS(NS, name);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  parent.appendChild(n);
+  return n;
+};
+function draw(id, field, height, fill) {
+  if (points.length < 2) return;
+  const root = document.getElementById(id);
+  // The canvas matches the real width so text stays 12px on a phone.
+  const W = Math.max(300, root.clientWidth), H = height, L = 84, R = 12, T = 10, B = 26;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": id + " chart; see the table below" }, root);
+  const vals = points.map(p => p[field]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (fill) hi = 0;
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const pad = fill ? 0 : (hi - lo) * 0.05;
+  lo -= pad; hi += pad;
+  const x = i => L + (W - L - R) * i / (points.length - 1);
+  const y = v => T + (H - T - B) * (hi - v) / (hi - lo);
+  for (let i = 0; i <= 3; i++) {
+    const v = lo + (hi - lo) * i / 3;
+    el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "var(--line)", "stroke-width": 1 }, svg);
+    const t = el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end", "font-size": 12, fill: "var(--text-2)" }, svg);
+    t.textContent = inr(v);
+  }
+  const ticks = Math.min(W < 600 ? 3 : 5, points.length);
+  for (let i = 0; i < ticks; i++) {
+    const k = Math.round(i * (points.length - 1) / (ticks - 1));
+    const anchor = i === 0 ? "start" : i === ticks - 1 ? "end" : "middle";
+    const t = el("text", { x: x(k), y: H - 6, "text-anchor": anchor, "font-size": 12, fill: "var(--text-2)" }, svg);
+    t.textContent = points[k].d;
+  }
+  const path = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("");
+  if (fill) {
+    el("path", { d: `${path}L${x(vals.length - 1)} ${y(0)}L${x(0)} ${y(0)}Z`, fill: "var(--series)", opacity: 0.18 }, svg);
+  }
+  el("path", { d: path, fill: "none", stroke: "var(--series)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+  const hair = el("line", { y1: T, y2: H - B, stroke: "var(--text-2)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const dot = el("circle", { r: 4, fill: "var(--series)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }, svg);
+  const tip = document.getElementById("tip");
+  root.appendChild(tip);
+  const hide = () => {
+    hair.setAttribute("visibility", "hidden");
+    dot.setAttribute("visibility", "hidden");
+    tip.style.display = "none";
+  };
+  svg.addEventListener("pointermove", e => {
+    const box = svg.getBoundingClientRect();
+    const sx = (e.clientX - box.left) * W / box.width;
+    const i = Math.max(0, Math.min(points.length - 1, Math.round((sx - L) / (W - L - R) * (points.length - 1))));
+    hair.setAttribute("x1", x(i)); hair.setAttribute("x2", x(i));
+    hair.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(vals[i]));
+    dot.setAttribute("visibility", "visible");
+    tip.textContent = `${points[i].d}: ${inr(vals[i])}`;
+    tip.style.display = "block";
+    const px = x(i) * box.width / W;
+    tip.style.left = Math.max(0, Math.min(box.width - tip.offsetWidth, px + 10)) + "px";
+    tip.style.top = "8px";
+  });
+  svg.addEventListener("pointerleave", hide);
+}
+draw("equity", "e", 320, false);
+draw("drawdown", "dd", 170, true);
+</script>
+</body>
+</html>

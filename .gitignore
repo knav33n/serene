@@ -1,0 +1,7 @@
+/calm
+/data/
+/reports/
+*.env
+.env*
+secrets*
+node_modules/

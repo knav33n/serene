@@ -1,0 +1,28 @@
+# Charges for index options on Zerodha. Percentages are as quoted: 0.15 = 0.15%.
+# Backtests fail on dates before the first period, so add older rates here
+# before testing earlier history.
+#
+# Sources, checked 2026-11-06:
+#   https://zerodha.com/charges/
+#   https://support.zerodha.com/category/account-opening/resident-individual/ri-charges/articles/how-is-the-securities-transaction-tax-stt-calculated
+#
+# exchange_pct and sebi_pct come from the current page; the date they took
+# effect is not confirmed, so the older period reuses them. Check contract
+# notes before relying on these to the rupee.
+periods:
+  - from: "2024-10-01"
+    brokerage_per_order: 20
+    stt_sell_pct: 0.1
+    stt_exercise_pct: 0.125
+    exchange_pct: {NFO: 0.03553, BFO: 0.0325}
+    sebi_pct: 0.0001
+    stamp_buy_pct: 0.003
+    gst_pct: 18
+  - from: "2026-04-01"
+    brokerage_per_order: 20
+    stt_sell_pct: 0.15
+    stt_exercise_pct: 0.15
+    exchange_pct: {NFO: 0.03553, BFO: 0.0325}
+    sebi_pct: 0.0001
+    stamp_buy_pct: 0.003
+    gst_pct: 18
