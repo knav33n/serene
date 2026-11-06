@@ -251,7 +251,8 @@ func (e *Engine) settle(closeAt time.Time) error {
 			continue
 		}
 		idx, ok := e.last[inst.IndexKey()]
-		if !ok || closeAt.Sub(idx.End) > 5*time.Minute {
+		// Since the closing auction, the index ends about 10 minutes before options.
+		if !ok || closeAt.Sub(idx.End) > 15*time.Minute {
 			return fmt.Errorf("no index close to settle %s", inst.Key())
 		}
 		side := market.Sell

@@ -3,8 +3,8 @@
 Research and trade Indian index options in Go. Strategies are written once and
 run unchanged in backtests, and later on paper and live.
 
-**Status:** research works on synthetic data, and broker login works. Real data
-download, paper trading and live trading are not built yet, and those commands
+**Status:** research works on synthetic data and real NIFTY options, and broker
+login works. Paper trading and live trading are not built yet, and those commands
 only return an error. See `docs/roadmap.md`.
 
 ## Quick start
@@ -66,6 +66,20 @@ The page is in `web/`. `web/dist` is committed, so `go build` doesn't need Node.
 After changing it, run `npm run build` in `web/`. To run the Postgres tests, set
 `CALM_TEST_DATABASE_URL`; they use a temporary schema.
 
+## Real data
+
+Downloads expired NIFTY options from Upstox into `data/upstox`. It needs the
+Upstox Plus plan and a login from today.
+
+```sh
+./calm research fetch       # safe to rerun: finished expiries are skipped
+./calm research coverage    # shows what's missing
+```
+
+A full download takes hours. If the token expires or the job stops, run
+`calm auth`, then the same command, and it carries on. To backtest on this data,
+set `data_dir: data/upstox` in your config.
+
 ## Writing a strategy
 
 Implement `strategy.Strategy` in `internal/strategies`, and add it to the
@@ -75,6 +89,8 @@ registry in `strategies.go`. `straddle.go` shows multi-leg selling, and
 - `OnBar` only ever receives closed bars.
 - Orders fill at the next minute's open, plus slippage.
 - `ctx.Chain` returns only contracts that have traded today.
+- Since 2026-08-03 the index freezes from about 15:15 while options trade until
+  15:40, so don't use `ctx.Spot` as a live level after 15:15.
 - Close positions yourself. Anything open at expiry cash-settles at intrinsic
   value.
 

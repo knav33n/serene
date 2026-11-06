@@ -37,20 +37,32 @@ type Bar struct {
 	OI        int64
 }
 
-// Session is an exchange's continuous trading window in IST.
+// Session is an exchange's continuous trading window in IST. The close can
+// change on a date, so history keeps the hours that applied at the time.
 type Session struct {
 	OpenHour, OpenMinute   int
 	CloseHour, CloseMinute int
+	LateFrom               Date // first day of the later close, if any
+	LateHour, LateMinute   int
 }
 
-// NSESession is the NSE and BSE equity derivatives session.
-var NSESession = Session{9, 15, 15, 30}
+// NSESession is the NSE equity derivatives session. Derivatives have closed at
+// 15:40 since 2026-08-03. The cash market moved to a closing auction that day,
+// so indices stop updating around 15:15 and jump to the close near 15:28, while
+// options keep trading. Don't treat index levels after 15:15 as live.
+var NSESession = Session{OpenHour: 9, OpenMinute: 15, CloseHour: 15, CloseMinute: 30,
+	LateFrom: Date{2026, time.August, 3}, LateHour: 15, LateMinute: 40}
 
 // Open returns the session start on d.
 func (s Session) Open(d Date) time.Time { return d.At(s.OpenHour, s.OpenMinute) }
 
 // Close returns the session end on d.
-func (s Session) Close(d Date) time.Time { return d.At(s.CloseHour, s.CloseMinute) }
+func (s Session) Close(d Date) time.Time {
+	if !s.LateFrom.IsZero() && !d.Before(s.LateFrom) {
+		return d.At(s.LateHour, s.LateMinute)
+	}
+	return d.At(s.CloseHour, s.CloseMinute)
+}
 
 // Contains reports whether t falls inside the session.
 func (s Session) Contains(t time.Time) bool {

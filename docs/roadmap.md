@@ -10,27 +10,38 @@ NIFTY and BANKNIFTY options; Indian equities and MCX commodities follow.
 | 2 | Engine, simulator, portfolio, settlement | Done |
 | 3 | Costs, margin, Greeks, metrics, report | Done |
 | - | `calm auth`: broker login, tokens in Postgres | Done, used with real Upstox and Zerodha |
-| 4 | Upstox ingest and coverage report | Next |
+| 4 | Upstox ingest and coverage report | Built for NIFTY |
 | 5 | Sweeps, walk-forward, example strategies | Done |
 | 6 | Paper mode: Kite ticker, live fills, journal, tick recording | Not started |
 | 7 | Live mode: order adapters, risk layer, reconciliation | Not started |
 
 ## Step 4: Upstox ingest
 
-- `calm research fetch`: resumable, repeatable, within rate limits.
+- `calm research fetch`: resumable, repeatable, paced to 1.1 requests per second.
 - `calm research coverage`: reports what's missing by expiry and contract.
 - Lot sizes come from each contract, never hardcoded.
-- Default scope: NIFTY and BANKNIFTY, strikes within ±5% of spot, 1-minute bars.
+- Scope so far: NIFTY only, 1-minute bars, strikes within 5% of the index's range
+  in the 30 days before expiry. BANKNIFTY needs its Upstox key adding.
 
-Findings:
+Findings from real responses, some of which contradict the docs:
 
 - Expired-instrument APIs need the Upstox Plus plan (`UDAPI1149` otherwise).
-- Expiries cover "up to six months", so run fetch regularly to build up history.
+- NIFTY expiries were available back to 2024-10-03 when checked on 2026-11-06,
+  not the six months the docs state. The window may roll, so keep fetching.
+- One expired-candle request returned 10 months, so one request per contract is
+  enough. Index candles are limited to one month per request.
+- Expired-candle lists don't include the unexpired series, so the current week's
+  contracts arrive after they expire.
+- Since 2026-08-03 derivatives close at 15:40 and the cash market has a closing
+  auction: the index freezes around 15:15 and jumps to the close near 15:28.
+  `market.NSESession` handles the date.
 - Developers report gaps in expired data, so measure coverage.
-- Index minute candles go back to January 2022 on all plans.
 - Kite has no candles for expired options, so Upstox is the historical source.
-- Unconfirmed: maximum date range per expired-candle request, and rate limits for
-  these endpoints (probably 50 per second, 500 per minute, 2,000 per 30 minutes).
+- Rate limits for these endpoints are inferred: 2,000 per 30 minutes is the
+  tightest, and the fetcher paces to it.
+- Each day file holds every strike of every live expiry, so backtests over real
+  data will load far more bars than synthetic ones. Filtering at load time is the
+  likely next speed-up.
 
 ## Step 6: Paper
 

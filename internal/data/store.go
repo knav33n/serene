@@ -273,3 +273,36 @@ func (s *Store) Contracts(ctx context.Context, underlying string) ([]market.Inst
 	}
 	return out, rows.Err()
 }
+
+// DayStat summarises one stored day.
+type DayStat struct {
+	Date      string
+	Contracts int // distinct instruments, excluding the index
+	Bars      int
+	IndexBars int
+}
+
+// DayStats summarises every stored day of an underlying.
+func (s *Store) DayStats(ctx context.Context, underlying, indexKey string) ([]DayStat, error) {
+	if !safeName.MatchString(underlying) {
+		return nil, fmt.Errorf("invalid underlying %q", underlying)
+	}
+	glob := filepath.Join(s.root, "bars", "underlying="+underlying, "date=*.parquet")
+	rows, err := s.db.QueryContext(ctx, `SELECT regexp_extract(filename, 'date=([0-9-]+)', 1) AS day,
+			count(DISTINCT key) FILTER (WHERE key <> $1), count(*), count(*) FILTER (WHERE key = $1)
+		FROM read_parquet(`+quote(glob)+`, hive_partitioning = false, filename = true)
+		GROUP BY day ORDER BY day`, indexKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DayStat
+	for rows.Next() {
+		var d DayStat
+		if err := rows.Scan(&d.Date, &d.Contracts, &d.Bars, &d.IndexBars); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}

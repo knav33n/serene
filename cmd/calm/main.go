@@ -21,11 +21,13 @@ import (
 	"calm/internal/auth"
 	"calm/internal/cost"
 	"calm/internal/data"
+	"calm/internal/ingest"
 	"calm/internal/margin"
 	"calm/internal/market"
 	"calm/internal/sim"
 	"calm/internal/strategy"
 	"calm/internal/synth"
+	"calm/internal/upstox"
 	"calm/web"
 )
 
@@ -40,9 +42,11 @@ const usage = `calm researches and trades Indian index options.
   calm research sweep       --config FILE
   calm research walkforward --config FILE
 
+  calm research fetch       [--underlying NIFTY] [--from DATE] [--to DATE] [--band-pct 5] [--data DIR]
+  calm research coverage    [--underlying NIFTY] [--data DIR]
+
 Not built yet:
-  calm research fetch, calm research coverage  (needs Upstox Plus)
-  calm prod paper, calm prod live              (needs Kite Connect)
+  calm prod paper, calm prod live
 `
 
 // config is the YAML run file.
@@ -105,22 +109,119 @@ func run(ctx context.Context, args []string) error {
 			return errors.New("--config is required")
 		}
 		return runResearch(ctx, args[1], *path)
-	case "research fetch", "research coverage", "prod paper", "prod live":
+	case "research fetch":
+		return runFetch(ctx, rest)
+	case "research coverage":
+		return runCoverage(ctx, rest)
+	case "prod paper", "prod live":
 		return fmt.Errorf("%q is not built yet", cmd)
 	}
 	fmt.Print(usage)
 	return fmt.Errorf("unknown command %q", cmd)
 }
 
-func runAuth(ctx context.Context, args []string) error {
+func openTokens(ctx context.Context) (*auth.PGStore, error) {
 	if err := auth.LoadDotEnv(".env"); err != nil {
-		return err
+		return nil, err
 	}
 	sealer, err := auth.NewSealer(os.Getenv("CALM_TOKEN_KEY"))
 	if err != nil {
+		return nil, err
+	}
+	return auth.OpenPostgres(ctx, os.Getenv("CALM_DATABASE_URL"), sealer, "calm")
+}
+
+func runFetch(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("fetch", flag.ContinueOnError)
+	underlying := fs.String("underlying", "NIFTY", "underlying name")
+	from := fs.String("from", "2000-01-01", "first expiry")
+	to := fs.String("to", "2100-01-01", "last expiry")
+	band := fs.Float64("band-pct", 5, "keep strikes this far outside the index's range in the month before expiry")
+	dir := fs.String("data", "data/upstox", "data directory")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	store, err := auth.OpenPostgres(ctx, os.Getenv("CALM_DATABASE_URL"), sealer, "calm")
+	f, err := market.ParseDate(*from)
+	if err != nil {
+		return err
+	}
+	t, err := market.ParseDate(*to)
+	if err != nil {
+		return err
+	}
+	tokens, err := openTokens(ctx)
+	if err != nil {
+		return err
+	}
+	defer tokens.Close()
+	token, err := auth.Load(ctx, tokens, "upstox")
+	if err != nil {
+		return err
+	}
+	store, err := data.Open(*dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	cfg := ingest.Config{Underlying: *underlying, Dir: *dir, BandPct: *band, From: f, To: t,
+		Log: func(format string, a ...any) {
+			fmt.Printf("%s "+format+"\n", append([]any{time.Now().In(market.IST).Format("15:04:05")}, a...)...)
+		}}
+	return ingest.Run(ctx, cfg, store, upstox.New(token.AccessToken))
+}
+
+func runCoverage(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("coverage", flag.ContinueOnError)
+	underlying := fs.String("underlying", "NIFTY", "underlying name")
+	dir := fs.String("data", "data/upstox", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	store, err := data.Open(*dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	cov, err := ingest.Report(ctx, *dir, *underlying, store)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "expiry\ttype\tlot\tlisted\tselected\tempty\tthin\tbars\tdropped")
+	var selected, empty, thin, bars, dropped int
+	for _, e := range cov.Expiries {
+		kind := "monthly"
+		if e.Weekly {
+			kind = "weekly"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", e.Expiry, kind, e.LotSize, e.Listed, e.Selected, e.Empty, e.Thin, e.Bars, e.Dropped)
+		selected += e.Selected
+		empty += e.Empty
+		thin += e.Thin
+		bars += e.Bars
+		dropped += e.Dropped
+	}
+	w.Flush()
+	fmt.Printf("\n%d expiries, %d contracts, %d bars. %d contracts empty, %d thin (under 100 bars), %d candles dropped outside session.\n",
+		len(cov.Expiries), selected, bars, empty, thin, dropped)
+	if len(cov.Days) > 0 {
+		fmt.Printf("%d trading days stored, %s to %s.\n", len(cov.Days), cov.Days[0].Date, cov.Days[len(cov.Days)-1].Date)
+	}
+	fmt.Printf("Missing expiries: %s\n", listOrNone(cov.Gaps))
+	fmt.Printf("Days with options but no index: %s\n", listOrNone(cov.NoIndex))
+	fmt.Printf("Days with a short index session: %s\n", listOrNone(cov.Short))
+	return nil
+}
+
+func listOrNone(v []string) string {
+	if len(v) == 0 {
+		return "none"
+	}
+	return fmt.Sprintf("%d: %s", len(v), strings.Join(v, ", "))
+}
+
+func runAuth(ctx context.Context, args []string) error {
+	store, err := openTokens(ctx)
 	if err != nil {
 		return err
 	}

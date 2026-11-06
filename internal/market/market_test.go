@@ -45,8 +45,22 @@ func TestPaiseString(t *testing.T) {
 	}
 }
 
+func TestCloseMovesOnItsDate(t *testing.T) {
+	before, _ := ParseDate("2026-07-31")
+	after, _ := ParseDate("2026-08-03")
+	if !NSESession.Close(before).Equal(before.At(15, 30)) || !NSESession.Close(after).Equal(after.At(15, 40)) {
+		t.Fatal("wrong close")
+	}
+	if NSESession.Contains(before.At(15, 35)) || !NSESession.Contains(after.At(15, 35)) {
+		t.Error("15:35 should be in session only after the change")
+	}
+	if _, end := NSESession.Bucket(after.At(15, 20), Hour1); !end.Equal(after.At(15, 40)) {
+		t.Errorf("last hourly bar should run to the new close, got %s", end)
+	}
+}
+
 func TestBucketAlignsToSessionOpen(t *testing.T) {
-	d, _ := ParseDate("2026-11-06")
+	d, _ := ParseDate("2026-07-15")
 	cases := []struct {
 		at         time.Time
 		tf         Timeframe
