@@ -72,6 +72,14 @@ summary { cursor: pointer; color: var(--text-2); }
   <p class="note">Bar data has no bid/ask, so fills are an assumption. Trust a result only if it survives the higher rows.</p>
   {{end}}
 
+  {{if .Rejects}}
+  <h2>Orders refused</h2>
+  <div class="wrap"><table>
+    <tr><th>Reason</th><th>Orders</th><th>First</th><th>Example</th></tr>
+    {{range .Rejects}}<tr><td>{{.Reason}}</td><td>{{.Count}}</td><td>{{.First}}</td><td>{{.Example}}</td></tr>{{end}}
+  </table></div>
+  {{end}}
+
   <h2>Detail</h2>
   <div class="tiles small">{{range .Quality}}<div class="tile"><b>{{.Value}}</b><span>{{.Label}}</span></div>{{end}}</div>
 

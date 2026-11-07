@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"calm/internal/engine"
 	"calm/internal/market"
 	"calm/internal/strategy"
 )
@@ -80,5 +81,19 @@ func TestLedgerCountsTrials(t *testing.T) {
 	b, _ := os.ReadFile(path)
 	if !strings.Contains(string(b), `"from":"2025-01-01"`) {
 		t.Fatalf("dates should be written as text: %s", b)
+	}
+}
+
+func TestRejectionsGroupByReason(t *testing.T) {
+	at := time.Date(2026, 11, 2, 10, 0, 0, 0, market.IST)
+	rows := rejections([]engine.Decision{
+		{Time: at, Verdict: engine.Accepted},
+		{Time: at, Verdict: engine.Rejected, Reason: "no_price", Detail: "no price for A"},
+		{Time: at.Add(time.Minute), Verdict: engine.Rejected, Reason: "margin", Detail: "margin ₹1"},
+		{Time: at.Add(2 * time.Minute), Verdict: engine.Rejected, Reason: "margin", Detail: "margin ₹2"},
+	})
+	if len(rows) != 2 || rows[0].Reason != "margin" || rows[0].Count != 2 || rows[0].Example != "margin ₹1" ||
+		rows[0].First != "2026-11-02 10:01" || rows[1].Count != 1 {
+		t.Fatalf("rows = %+v", rows)
 	}
 }

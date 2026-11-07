@@ -292,6 +292,26 @@ func TestMarginRejection(t *testing.T) {
 	if !errors.Is(got, strategy.ErrRejected) || r.Rejected != 1 || len(r.Orders) != 0 {
 		t.Fatalf("got %v rejected %d orders %d", got, r.Rejected, len(r.Orders))
 	}
+	if len(r.Decisions) != 1 {
+		t.Fatalf("decisions = %+v", r.Decisions)
+	}
+	d := r.Decisions[0]
+	if d.Verdict != Rejected || d.Reason != "margin" || d.Tag != "x" || d.OrderID != 0 || !d.Time.Equal(day.At(10, 0)) {
+		t.Fatalf("decision = %+v", d)
+	}
+}
+
+func TestAcceptedOrdersAreLogged(t *testing.T) {
+	s := once(func(ctx strategy.Context) error {
+		return ctx.Submit("x", market.Leg{Instrument: ce, Side: market.Buy, Lots: 1})
+	}, day.At(10, 0))
+	r, _ := runWith(t, session(day, market.Rupees(24000), ce), cost.Zero(), market.Rupees(1e6), s)
+	if len(r.Orders) != 1 || len(r.Decisions) != 1 {
+		t.Fatalf("orders %d decisions %+v", len(r.Orders), r.Decisions)
+	}
+	if d := r.Decisions[0]; d.Verdict != Accepted || d.OrderID != r.Orders[0].ID || d.Reason != "" {
+		t.Fatalf("decision = %+v", d)
+	}
 }
 
 // A strategy that reads the option's price each minute and flips on it, so any

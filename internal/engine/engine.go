@@ -33,15 +33,36 @@ type EquityPoint struct {
 	Equity market.Paise
 }
 
+// Verdict is what happened to an order a strategy submitted.
+type Verdict string
+
+const (
+	Accepted Verdict = "accepted"
+	Rejected Verdict = "rejected"
+)
+
+// Decision records why an order was accepted or refused. Reason is a stable
+// code to group by; Detail says what was found.
+type Decision struct {
+	Time    time.Time
+	Tag     string
+	OrderID int64 // zero when rejected
+	Verdict Verdict
+	Reason  string
+	Detail  string
+}
+
 // Result is a run's output.
 type Result struct {
-	Capital  market.Paise
-	Equity   []EquityPoint
-	Trades   []portfolio.Trade
-	Orders   []market.Order
-	Fills    []market.Fill
-	Charges  market.Paise
-	Rejected int
+	Capital market.Paise
+	Equity  []EquityPoint
+	Trades  []portfolio.Trade
+	Orders  []market.Order
+	Fills   []market.Fill
+	Charges market.Paise
+	// Decisions holds every order submitted, accepted or not, in order.
+	Decisions []Decision
+	Rejected  int
 	// MaxDrawdown is measured on every minute, so it sees intraday losses
 	// that daily closes hide.
 	MaxDrawdown market.Paise
@@ -368,8 +389,7 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 		key := l.Instrument.Key()
 		bar, ok := e.last[key]
 		if !ok {
-			e.res.Rejected++
-			return fmt.Errorf("%w: no price for %s", strategy.ErrRejected, key)
+			return e.reject(tag, "no_price", "no price for "+key)
 		}
 		if held[key] == nil {
 			held[key] = &margin.Holding{Instrument: l.Instrument}
@@ -386,8 +406,7 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 		return err
 	}
 	if e.port.Cash+premium-req < 0 {
-		e.res.Rejected++
-		return fmt.Errorf("%w: margin %s exceeds available cash", strategy.ErrRejected, req)
+		return e.reject(tag, "margin", fmt.Sprintf("margin %s exceeds available cash", req))
 	}
 	e.nextID++
 	o := market.Order{ID: e.nextID, Tag: tag, Legs: legs, Placed: e.now}
@@ -395,5 +414,13 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 		return err
 	}
 	e.res.Orders = append(e.res.Orders, o)
+	e.res.Decisions = append(e.res.Decisions, Decision{Time: e.now, Tag: tag, OrderID: o.ID, Verdict: Accepted})
 	return nil
+}
+
+// reject records a refused order and returns the error strategies see.
+func (e *Engine) reject(tag, reason, detail string) error {
+	e.res.Rejected++
+	e.res.Decisions = append(e.res.Decisions, Decision{Time: e.now, Tag: tag, Verdict: Rejected, Reason: reason, Detail: detail})
+	return fmt.Errorf("%w: %s", strategy.ErrRejected, detail)
 }
