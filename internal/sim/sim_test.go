@@ -23,7 +23,7 @@ func bars(price market.Paise, is ...market.Instrument) map[string]market.Bar {
 }
 
 func TestFillsAtOpenWithSlippageRoundedAgainstTrader(t *testing.T) {
-	b, _ := New(Config{SlippageBps: 10, MinTicks: 1, Tick: 5})
+	b := BarOpen{SlippageBps: 10, MinTicks: 1, Tick: 5}
 	cases := []struct {
 		side  market.Side
 		price market.Paise

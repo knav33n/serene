@@ -4,7 +4,6 @@ package sim
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
 	"time"
 
@@ -19,6 +18,9 @@ type Config struct {
 	MinTicks    int64         // minimum slippage in ticks
 	Tick        market.Paise  // price increment
 	MaxWait     time.Duration // cancel an order that cannot fill for this long
+	// Fills prices each leg. Nil fills at the bar's open with the slippage
+	// above, which is the backtest model.
+	Fills FillModel
 }
 
 // DefaultConfig is a deliberately cautious starting point. Calibrate it
@@ -27,11 +29,13 @@ func DefaultConfig() Config {
 	return Config{SlippageBps: 30, MinTicks: 2, Tick: 5, MaxWait: 3 * time.Minute}
 }
 
-// Broker fills an order at the open of the first minute in which every leg has
-// a candle. All legs fill together, so a backtest does not model legging risk.
+// Broker fills an order in the first minute in which its fill model can price
+// every leg; with BarOpen, that is the open of the first minute in which every
+// leg has a candle. All legs fill together, so it does not model legging risk.
 // A minute with no candle means no trade: stale prices are never used.
 type Broker struct {
 	cfg       Config
+	fills     FillModel
 	pending   []*oms.Order
 	orders    []*oms.Order
 	positions map[string]int64
@@ -50,14 +54,18 @@ func New(cfg Config) (*Broker, error) {
 	if cfg.Tick <= 0 {
 		return nil, fmt.Errorf("tick must be positive")
 	}
-	return &Broker{cfg: cfg, positions: map[string]int64{}, expiry: map[string]market.Date{}}, nil
+	fills := cfg.Fills
+	if fills == nil {
+		fills = BarOpen{SlippageBps: cfg.SlippageBps, MinTicks: cfg.MinTicks, Tick: cfg.Tick}
+	}
+	return &Broker{cfg: cfg, fills: fills, positions: map[string]int64{}, expiry: map[string]market.Date{}}, nil
 }
 
 // Submit queues an order. It cannot fill before the next minute's open, which
 // is what keeps a decision from trading on the bar that produced it.
 func (b *Broker) Submit(_ context.Context, o market.Order) error {
-	if o.Kind == market.LimitOrder {
-		return fmt.Errorf("order %d: the simulator fills market orders only", o.ID)
+	if lf, ok := b.fills.(limitFiller); o.Kind == market.LimitOrder && !(ok && lf.FillsLimits()) {
+		return fmt.Errorf("order %d: this fill model fills market orders only", o.ID)
 	}
 	for _, l := range o.Legs {
 		if l.Qty() <= 0 {
@@ -110,26 +118,16 @@ func (b *Broker) OnMinute(_ context.Context, t time.Time, bars map[string]market
 func (b *Broker) tryFill(o market.Order, t time.Time, bars map[string]market.Bar) ([]market.Fill, bool) {
 	fills := make([]market.Fill, 0, len(o.Legs))
 	for _, l := range o.Legs {
-		bar, ok := bars[l.Instrument.Key()]
+		price, ok := b.fills.Price(l, t, bars)
 		if !ok {
 			return nil, false
 		}
 		fills = append(fills, market.Fill{
 			OrderID: o.ID, Tag: o.Tag, Instrument: l.Instrument, Side: l.Side, Qty: l.Qty(),
-			Price: b.slip(bar.Open, l.Side), Time: t, Kind: market.Traded,
+			Price: price, Time: t, Kind: market.Traded,
 		})
 	}
 	return fills, true
-}
-
-// slip moves the price against the trader, then rounds to a tick the same way.
-func (b *Broker) slip(price market.Paise, side market.Side) market.Paise {
-	slip := max(float64(price)*b.cfg.SlippageBps/1e4, float64(b.cfg.MinTicks*int64(b.cfg.Tick)))
-	tick := float64(b.cfg.Tick)
-	if side == market.Buy {
-		return market.Paise(math.Ceil((float64(price)+slip)/tick)) * b.cfg.Tick
-	}
-	return max(market.Paise(math.Floor((float64(price)-slip)/tick))*b.cfg.Tick, b.cfg.Tick)
 }
 
 func (b *Broker) cancel(o *oms.Order, reason string) error {
