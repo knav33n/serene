@@ -25,6 +25,10 @@ type Config struct {
 	Costs     *cost.Schedule
 	Margin    margin.Model
 	Capital   market.Paise
+	// IndexCloses holds official closes by index key, which is what expiring
+	// contracts settle at. Nil settles at the last index bar, for data with no
+	// official closes. Otherwise a missing close is an error.
+	IndexCloses map[string]map[market.Date]market.Paise
 }
 
 // EquityPoint is end-of-day equity.
@@ -239,6 +243,19 @@ func (e *Engine) endDay(ctx context.Context) error {
 	return nil
 }
 
+// settlementClose returns the index level a contract settles at. The exchange
+// uses the official close, which differed from the last 1-minute bar by up to
+// 120 points before the closing auction began.
+func (e *Engine) settlementClose(inst market.Instrument, closeAt time.Time) (market.Paise, bool) {
+	if e.cfg.IndexCloses != nil {
+		c, ok := e.cfg.IndexCloses[inst.IndexKey()][e.day]
+		return c, ok
+	}
+	idx, ok := e.last[inst.IndexKey()]
+	// Since the closing auction, the index ends about 10 minutes before options.
+	return idx.Close, ok && closeAt.Sub(idx.End) <= 15*time.Minute
+}
+
 // settle cash-settles contracts expiring today at intrinsic value. A missing
 // or stale index close is an error, because any guess would be a made-up P&L.
 func (e *Engine) settle(closeAt time.Time) error {
@@ -250,9 +267,8 @@ func (e *Engine) settle(closeAt time.Time) error {
 		if inst.Expiry != e.day {
 			continue
 		}
-		idx, ok := e.last[inst.IndexKey()]
-		// Since the closing auction, the index ends about 10 minutes before options.
-		if !ok || closeAt.Sub(idx.End) > 15*time.Minute {
+		level, ok := e.settlementClose(inst, closeAt)
+		if !ok {
 			return fmt.Errorf("no index close to settle %s", inst.Key())
 		}
 		side := market.Sell
@@ -261,7 +277,7 @@ func (e *Engine) settle(closeAt time.Time) error {
 			side, qty = market.Buy, -p.Qty
 		}
 		f := market.Fill{Tag: p.Tag, Instrument: inst, Side: side, Qty: qty,
-			Price: inst.Intrinsic(idx.Close), Time: closeAt, Kind: market.Settled}
+			Price: inst.Intrinsic(level), Time: closeAt, Kind: market.Settled}
 		if err := e.book([]market.Fill{f}); err != nil {
 			return err
 		}

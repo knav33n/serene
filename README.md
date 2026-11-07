@@ -78,7 +78,8 @@ Upstox Plus plan and a login from today.
 
 A full download takes hours. If the token expires or the job stops, run
 `calm auth`, then the same command, and it carries on. To backtest on this data,
-set `data_dir: data/upstox` in your config.
+set `data_dir: data/upstox` and `settlement: data/market` in your config, so
+expiries settle at NSE's official close.
 
 ## Daily market report
 

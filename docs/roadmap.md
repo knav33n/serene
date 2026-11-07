@@ -43,6 +43,12 @@ Findings from real responses, some of which contradict the docs:
   auction: the index freezes around 15:15 and jumps to the close near 15:28.
   `market.NSESession` handles the date.
 - Developers report gaps in expired data, so measure coverage.
+- Untraded minutes still get a candle, carrying the last price with zero volume:
+  about half of all bars. The simulator never fills on them. At-the-money
+  front-week strikes almost always trade, so the default straddle is unchanged.
+- Expiries settle at NSE's official close (`settlement: data/market`). Before the
+  closing auction it differed from the last 1-minute index bar by a median 15
+  and up to 120 points; holding the straddle to expiry nets 7% less with it.
 - Kite has no candles for expired options, so Upstox is the historical source.
 - Rate limits for these endpoints are inferred: 2,000 per 30 minutes is the
   tightest, and the fetcher paces to it.

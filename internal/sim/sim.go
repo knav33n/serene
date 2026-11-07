@@ -25,8 +25,9 @@ func DefaultConfig() Config {
 }
 
 // Broker fills an order at the open of the first minute in which every leg has
-// a candle. All legs fill together, so a backtest does not model legging risk.
-// A minute with no candle means no trade: stale prices are never used.
+// a traded candle. All legs fill together, so a backtest does not model legging
+// risk. A minute with no candle or no volume means no trade: the data carries the
+// last price through untraded minutes, and those stale prices are never used.
 type Broker struct {
 	cfg      Config
 	pending  []market.Order
@@ -75,7 +76,7 @@ func (b *Broker) tryFill(o market.Order, t time.Time, bars map[string]market.Bar
 	fills := make([]market.Fill, 0, len(o.Legs))
 	for _, l := range o.Legs {
 		bar, ok := bars[l.Instrument.Key()]
-		if !ok {
+		if !ok || bar.Volume == 0 {
 			return nil, false
 		}
 		fills = append(fills, market.Fill{

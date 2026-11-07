@@ -67,6 +67,7 @@ type config struct {
 	To         string          `yaml:"to"`
 	Capital    float64         `yaml:"capital"`
 	DataDir    string          `yaml:"data_dir"`
+	Settlement string          `yaml:"settlement"` // NSE data directory, or last_bar
 	CostsFile  string          `yaml:"costs_file"`
 	ReportDir  string          `yaml:"report_dir"`
 	Params     strategy.Params `yaml:"params"`
@@ -909,6 +910,40 @@ func loadConfig(path string) (config, analytics.Spec, error) {
 		Margin: margin.Model{NakedPct: c.Margin.NakedPct}, Costs: costs}, nil
 }
 
+// settlementIndex names the NSE index each underlying settles against.
+var settlementIndex = map[string]string{"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank"}
+
+// settlementCloses loads the official closes expiries settle at. The setting is
+// required, so a real-data run can't settle at the last bar by omission.
+func settlementCloses(ctx context.Context, c config, spec analytics.Spec) (map[market.Date]market.Paise, error) {
+	switch c.Settlement {
+	case "":
+		return nil, errors.New("settlement is required: the NSE data directory, or last_bar for synthetic data")
+	case "last_bar":
+		return nil, nil
+	}
+	name, ok := settlementIndex[spec.Underlying]
+	if !ok {
+		return nil, fmt.Errorf("no settlement index for %s", spec.Underlying)
+	}
+	store, err := data.Open(c.Settlement)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	rows, err := store.IndexDays(ctx, spec.From, spec.To)
+	if err != nil {
+		return nil, err
+	}
+	closes := map[market.Date]market.Paise{}
+	for _, r := range rows {
+		if r.Name == name {
+			closes[r.Date] = r.Close
+		}
+	}
+	return closes, nil
+}
+
 func runResearch(ctx context.Context, action, path string) error {
 	c, spec, err := loadConfig(path)
 	if err != nil {
@@ -919,6 +954,9 @@ func runResearch(ctx context.Context, action, path string) error {
 		return err
 	}
 	defer store.Close()
+	if spec.Closes, err = settlementCloses(ctx, c, spec); err != nil {
+		return err
+	}
 	metric := c.Sweep.Metric
 	if metric == "" {
 		metric = "sharpe"

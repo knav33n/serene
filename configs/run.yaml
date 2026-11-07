@@ -6,6 +6,7 @@ from: "2026-08-03"
 to: "2026-11-30"
 capital: 1000000
 data_dir: data/synthetic
+settlement: last_bar # real data: data/market, for NSE's official closes
 costs_file: configs/costs.yaml
 report_dir: reports
 

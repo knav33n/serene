@@ -42,7 +42,7 @@ func (s *script) OnFill(_ strategy.Context, f market.Fill) error {
 
 func bar(key string, t time.Time, open, cl market.Paise) market.Bar {
 	return market.Bar{Key: key, Timeframe: market.Minute1, Time: t, End: t.Add(time.Minute),
-		Open: open, High: max(open, cl), Low: min(open, cl), Close: cl}
+		Open: open, High: max(open, cl), Low: min(open, cl), Close: cl, Volume: 75}
 }
 
 // session returns index bars for d at a fixed level, plus an option bar per
@@ -196,6 +196,41 @@ func TestSettlementAtExpiry(t *testing.T) {
 	}
 }
 
+func runSettled(closes map[string]map[market.Date]market.Paise) (Result, error) {
+	s := once(func(ctx strategy.Context) error {
+		return ctx.Submit("x", market.Leg{Instrument: ce, Side: market.Buy, Lots: 1})
+	}, day.At(10, 0))
+	b, err := sim.New(sim.Config{Tick: 5, MaxWait: 3 * time.Minute})
+	if err != nil {
+		return Result{}, err
+	}
+	cfg := Config{Contracts: contracts, Session: market.NSESession, Costs: cost.Zero(),
+		Margin: margin.Model{NakedPct: 10}, Capital: market.Rupees(1e7), IndexCloses: closes}
+	return New(cfg, NewSliceFeed(session(day, market.Rupees(24100), ce)), b, s).Run(context.Background())
+}
+
+func TestSettlementUsesTheOfficialClose(t *testing.T) {
+	// The last bar says 24100; the official close of 24150 is what pays.
+	r, err := runSettled(map[string]map[market.Date]market.Paise{indexK: {day: market.Rupees(24150)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Trades) != 1 || !r.Trades[0].Settled {
+		t.Fatalf("trades %+v", r.Trades)
+	}
+	if want := market.Rupees(50) * 65; r.Trades[0].Gross != want {
+		t.Errorf("gross %d want %d", r.Trades[0].Gross, want)
+	}
+}
+
+func TestMissingOfficialCloseIsAnError(t *testing.T) {
+	// The last bar must not stand in for a close that is absent.
+	_, err := runSettled(map[string]map[market.Date]market.Paise{indexK: {}})
+	if err == nil || !strings.Contains(err.Error(), "no index close") {
+		t.Fatalf("err %v", err)
+	}
+}
+
 func TestExpiryComesFromTheContractNotTheCalendar(t *testing.T) {
 	// 2026-11-09 is a Monday; a holiday moved this expiry off Tuesday.
 	if day.Weekday() != time.Monday {
@@ -259,6 +294,23 @@ func TestNoCandleMeansNoFill(t *testing.T) {
 	r, b := runWith(t, bars, cost.Zero(), market.Rupees(1e6), s)
 	if len(s.fills) != 0 || b.Unfilled != 1 || len(r.Trades) != 0 {
 		t.Fatalf("fills %d unfilled %d", len(s.fills), b.Unfilled)
+	}
+}
+
+func TestZeroVolumeBarMeansNoFill(t *testing.T) {
+	bars := session(day, market.Rupees(24000), ce)
+	// Minutes after the order carry the last price with no trade, then one trades.
+	for i := range bars {
+		if bars[i].Key == ce.Key() && bars[i].Time.Before(day.At(10, 3)) {
+			bars[i].Volume = 0
+		}
+	}
+	s := once(func(ctx strategy.Context) error {
+		return ctx.Submit("x", market.Leg{Instrument: ce, Side: market.Buy, Lots: 1})
+	}, day.At(10, 0))
+	r, _ := runWith(t, bars, cost.Zero(), market.Rupees(1e7), s)
+	if len(r.Fills) == 0 || !r.Fills[0].Time.Equal(day.At(10, 3)) {
+		t.Fatalf("fills %+v", r.Fills)
 	}
 }
 

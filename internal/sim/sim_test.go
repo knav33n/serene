@@ -17,7 +17,7 @@ var (
 func bars(price market.Paise, is ...market.Instrument) map[string]market.Bar {
 	m := map[string]market.Bar{}
 	for _, i := range is {
-		m[i.Key()] = market.Bar{Key: i.Key(), Open: price, Close: price * 2}
+		m[i.Key()] = market.Bar{Key: i.Key(), Open: price, Close: price * 2, Volume: 75}
 	}
 	return m
 }

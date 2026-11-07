@@ -26,6 +26,9 @@ type Spec struct {
 	Sim        sim.Config
 	Margin     margin.Model
 	Costs      *cost.Schedule
+	// Closes holds official index closes by date. Nil settles expiries at the
+	// last index bar, for data with no official closes.
+	Closes map[market.Date]market.Paise
 }
 
 // Outcome is a finished backtest.
@@ -58,6 +61,10 @@ func Run(ctx context.Context, store *data.Store, s Spec) (Outcome, error) {
 	}
 	cfg := engine.Config{Contracts: contracts, Session: market.NSESession,
 		Costs: s.Costs, Margin: s.Margin, Capital: s.Capital}
+	if s.Closes != nil {
+		idx := market.Index(market.NSE, s.Underlying).Key()
+		cfg.IndexCloses = map[string]map[market.Date]market.Paise{idx: s.Closes}
+	}
 	r, err := engine.New(cfg, feed, b, strat).Run(ctx)
 	if err != nil {
 		return Outcome{}, err
