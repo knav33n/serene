@@ -27,7 +27,8 @@ var IndexKeys = map[string]string{"NIFTY": "NSE_INDEX|Nifty 50"}
 // bandWindow is how long before expiry the index range is measured.
 const bandWindow = 30
 
-// lookback covers a contract's whole life, and the index before the first expiry.
+// lookback covers the traded life of all but the longest-dated contracts, and
+// the index before the first expiry.
 const lookback = 400
 
 // Config is one download.

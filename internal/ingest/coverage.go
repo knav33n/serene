@@ -29,6 +29,7 @@ type ExpiryCoverage struct {
 type Coverage struct {
 	Expiries []ExpiryCoverage
 	Gaps     []string // missing stretches between expiries
+	Empty    []string // expiries with contracts listed but no bars at all
 	Days     []data.DayStat
 	NoIndex  []string // days with options but no index bars
 	Short    []string // days with fewer index bars than a full session
@@ -67,11 +68,15 @@ func Report(ctx context.Context, dir, underlying string, store *data.Store) (Cov
 			}
 		}
 		out.Expiries = append(out.Expiries, e)
+		if e.Selected > 0 && e.Bars == 0 {
+			out.Empty = append(out.Empty, e.Expiry)
+		}
 		if d, err := market.ParseDate(rec.Expiry); err == nil {
 			dates = append(dates, d)
 		}
 	}
 	sort.Slice(out.Expiries, func(i, j int) bool { return out.Expiries[i].Expiry < out.Expiries[j].Expiry })
+	sort.Strings(out.Empty)
 	sort.Slice(dates, func(i, j int) bool { return dates[i].Before(dates[j]) })
 	for i := 1; i < len(dates); i++ {
 		// Holidays can move an expiry a day or two, but not a whole week.

@@ -251,3 +251,23 @@ func TestCoverageFlagsMissingExpiries(t *testing.T) {
 		t.Errorf("gaps %v", cov.Gaps)
 	}
 }
+
+func TestCoverageFlagsEmptyExpiries(t *testing.T) {
+	ctx := context.Background()
+	f := &fake{}
+	c, store, cfg := setup(t, f)
+	if err := Run(ctx, cfg, store, c); err != nil {
+		t.Fatal(err)
+	}
+	rec := ExpiryRecord{Expiry: "2026-06-02", Contracts: []ContractRecord{{Key: "a"}, {Key: "b"}}}
+	if err := writeJSON(manifestDir(cfg)+"/2026-06-02.json", rec); err != nil {
+		t.Fatal(err)
+	}
+	cov, err := Report(ctx, cfg.Dir, "NIFTY", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cov.Empty) != 1 || cov.Empty[0] != "2026-06-02" {
+		t.Errorf("empty %v", cov.Empty)
+	}
+}

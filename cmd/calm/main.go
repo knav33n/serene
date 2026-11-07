@@ -208,6 +208,7 @@ func runCoverage(ctx context.Context, args []string) error {
 		fmt.Printf("%d trading days stored, %s to %s.\n", len(cov.Days), cov.Days[0].Date, cov.Days[len(cov.Days)-1].Date)
 	}
 	fmt.Printf("Missing expiries: %s\n", listOrNone(cov.Gaps))
+	fmt.Printf("Expiries with no bars: %s\n", listOrNone(cov.Empty))
 	fmt.Printf("Days with options but no index: %s\n", listOrNone(cov.NoIndex))
 	fmt.Printf("Days with a short index session: %s\n", listOrNone(cov.Short))
 	return nil

@@ -20,6 +20,8 @@ import (
 var (
 	ErrAuth = errors.New("upstox rejected the token: run calm auth")
 	ErrPlan = errors.New("this API needs the Upstox Plus plan")
+	// ErrServer marks a 5xx response.
+	ErrServer = errors.New("upstox server error")
 )
 
 // Client calls Upstox one request at a time, evenly paced. Upstox allows 2,000
@@ -77,7 +79,19 @@ type envelope struct {
 // get fetches a path into out, retrying rate limits, server errors and network
 // failures with increasing delays.
 func (c *Client) get(ctx context.Context, path string, out any) error {
-	const attempts = 7
+	return c.fetch(ctx, path, out, attempts)
+}
+
+// attempts is how many times a request is tried.
+const attempts = 7
+
+// candleTries is how many times a candle request meets a server error before
+// its window is split. An oversized window fails every time, so a full backoff
+// would cost five minutes on each long-dated contract.
+const candleTries = 2
+
+// fetch is get with a separate, usually lower, limit on server errors.
+func (c *Client) fetch(ctx context.Context, path string, out any, serverTries int) error {
 	delay := c.Backoff
 	var last error
 	for try := range attempts {
@@ -92,6 +106,9 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 			return err
 		}
 		last = err
+		if errors.Is(err, ErrServer) && try+1 >= serverTries {
+			return fmt.Errorf("gave up after %d tries: %w", try+1, err)
+		}
 	}
 	return fmt.Errorf("gave up after %d tries: %w", attempts, last)
 }
@@ -129,8 +146,10 @@ func (c *Client) once(ctx context.Context, path string, out any) (retry bool, er
 		return false, ErrPlan
 	case resp.StatusCode == http.StatusUnauthorized:
 		return false, ErrAuth
-	case resp.StatusCode == http.StatusTooManyRequests, resp.StatusCode >= 500:
+	case resp.StatusCode == http.StatusTooManyRequests:
 		return true, fmt.Errorf("HTTP %d %s", resp.StatusCode, msg)
+	case resp.StatusCode >= 500:
+		return true, fmt.Errorf("%w: HTTP %d %s", ErrServer, resp.StatusCode, msg)
 	case resp.StatusCode != http.StatusOK:
 		return false, fmt.Errorf("HTTP %d %s %s", resp.StatusCode, code, msg)
 	case jsonErr != nil:
@@ -218,12 +237,28 @@ func number(v any) (float64, error) {
 	return 0, fmt.Errorf("not a number: %v", v)
 }
 
-// ExpiredCandles returns an expired contract's 1-minute candles. Upstox serves
-// a contract's whole life in one response.
+// ExpiredCandles returns an expired contract's 1-minute candles, newest first.
+// Upstox answers a wide window in one response, but returns HTTP 500 for one
+// holding about 100,000 candles or more, so a window that fails is split in
+// half. A single day that fails can't be split, and returns the error.
 func (c *Client) ExpiredCandles(ctx context.Context, expiredKey string, from, to market.Date) ([]Candle, error) {
 	var d candleData
 	path := fmt.Sprintf("/v2/expired-instruments/historical-candle/%s/1minute/%s/%s", url.PathEscape(expiredKey), to, from)
-	if err := c.get(ctx, path, &d); err != nil {
+	err := c.fetch(ctx, path, &d, candleTries)
+	if errors.Is(err, ErrServer) && from.Before(to) {
+		days := int(to.At(0, 0).Sub(from.At(0, 0)).Hours() / 24)
+		mid := from.AddDays(days / 2)
+		newer, err := c.ExpiredCandles(ctx, expiredKey, mid.AddDays(1), to)
+		if err != nil {
+			return nil, err
+		}
+		older, err := c.ExpiredCandles(ctx, expiredKey, from, mid)
+		if err != nil {
+			return nil, err
+		}
+		return append(newer, older...), nil
+	}
+	if err != nil {
 		return nil, err
 	}
 	return parseCandles(d)

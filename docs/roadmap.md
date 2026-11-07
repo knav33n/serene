@@ -28,8 +28,14 @@ Findings from real responses, some of which contradict the docs:
 - Expired-instrument APIs need the Upstox Plus plan (`UDAPI1149` otherwise).
 - NIFTY expiries were available back to 2024-10-03 when checked on 2026-11-06,
   not the six months the docs state. The window may roll, so keep fetching.
-- One expired-candle request returned 10 months, so one request per contract is
-  enough. Index candles are limited to one month per request.
+- One expired-candle request can cover a contract's whole life, but returns
+  HTTP 500 at about 100,000 candles (seen on the Dec 2025 expiry, with 91,672
+  still fine), so `ExpiredCandles` splits a window that fails. Index candles are
+  limited to one month per request.
+- The 2024-12-26 monthly expiry lists 281 contracts, but Upstox returned no
+  candles for the four checked over any window, and none in the full download.
+  Its manifest is kept, so a fetch won't ask again. `calm research coverage`
+  lists it under empty expiries.
 - Expired-candle lists don't include the unexpired series, so the current week's
   contracts arrive after they expire.
 - Since 2026-08-03 derivatives close at 15:40 and the cash market has a closing
