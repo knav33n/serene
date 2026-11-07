@@ -49,3 +49,16 @@ func (d Date) AddDays(n int) Date { return DateOf(d.At(12, 0).AddDate(0, 0, n)) 
 
 // Weekday returns the day of the week.
 func (d Date) Weekday() time.Weekday { return d.At(12, 0).Weekday() }
+
+// MarshalText writes the date as YYYY-MM-DD, in JSON and YAML alike.
+func (d Date) MarshalText() ([]byte, error) { return []byte(d.String()), nil }
+
+// UnmarshalText reads YYYY-MM-DD.
+func (d *Date) UnmarshalText(b []byte) error {
+	v, err := ParseDate(string(b))
+	if err != nil {
+		return err
+	}
+	*d = v
+	return nil
+}

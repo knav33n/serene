@@ -1,0 +1,84 @@
+package analytics
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"calm/internal/market"
+	"calm/internal/strategy"
+)
+
+func date(t *testing.T, s string) market.Date {
+	t.Helper()
+	d, err := market.ParseDate(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestHoldoutRefusesUnlessUnsealed(t *testing.T) {
+	dir := t.TempDir()
+	sealedDir := filepath.Join(dir, "real")
+	file := filepath.Join(dir, "holdout.yaml")
+	if err := os.WriteFile(file, []byte(sealedDir+`: "2026-05-01"`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := LoadHoldouts(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sealed, err := h.Check(sealedDir, date(t, "2026-04-30"), false); sealed || err != nil {
+		t.Fatalf("before the holdout: sealed=%v err=%v", sealed, err)
+	}
+	if _, err := h.Check(sealedDir, date(t, "2026-05-01"), false); err == nil || !strings.Contains(err.Error(), "--unseal") {
+		t.Fatalf("reaching the holdout was allowed: %v", err)
+	}
+	// The same directory spelt differently is still sealed.
+	if _, err := h.Check(sealedDir+"/./", date(t, "2026-06-01"), false); err == nil {
+		t.Fatal("an unclean path bypassed the holdout")
+	}
+	if sealed, err := h.Check(sealedDir, date(t, "2026-06-01"), true); !sealed || err != nil {
+		t.Fatalf("unseal: sealed=%v err=%v", sealed, err)
+	}
+	if sealed, err := h.Check(filepath.Join(dir, "synthetic"), date(t, "2026-06-01"), false); sealed || err != nil {
+		t.Fatalf("an unlisted directory: sealed=%v err=%v", sealed, err)
+	}
+	if _, err := LoadHoldouts(filepath.Join(dir, "missing.yaml")); err == nil {
+		t.Fatal("a missing holdout file must be an error")
+	}
+}
+
+func TestLedgerCountsTrials(t *testing.T) {
+	path := LedgerPath(t.TempDir())
+	if n, _, err := TrialCount(path, "s", "NIFTY"); n != 0 || err != nil {
+		t.Fatalf("empty ledger: %d, %v", n, err)
+	}
+	spec := Spec{Strategy: "s", Underlying: "NIFTY", Params: strategy.Params{"a": 1},
+		From: date(t, "2025-01-01"), To: date(t, "2025-06-30")}
+	other := spec
+	other.Strategy = "other"
+	now := time.Date(2026, 11, 7, 9, 0, 0, 0, market.IST)
+	recs := []TrialRecord{
+		Record("backtest", spec, Metrics{Trades: 3}, 1, false, "abc", now),
+		Record("walkforward", spec, Metrics{}, 12, true, "abc", now),
+		Record("backtest", other, Metrics{}, 1, false, "abc", now),
+	}
+	if err := AppendTrials(path, recs[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendTrials(path, recs[2:]); err != nil {
+		t.Fatal(err)
+	}
+	n, unsealed, err := TrialCount(path, "s", "NIFTY")
+	if n != 13 || unsealed != 1 || err != nil {
+		t.Fatalf("count = %d unsealed %d, %v; want 13 and 1", n, unsealed, err)
+	}
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), `"from":"2025-01-01"`) {
+		t.Fatalf("dates should be written as text: %s", b)
+	}
+}

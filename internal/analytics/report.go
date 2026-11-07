@@ -38,10 +38,20 @@ type slipRow struct {
 	Loss                         bool
 }
 
+// Provenance is what a report says about how its result was reached.
+type Provenance struct {
+	// Trials counts every parameter set tried for this strategy on this data,
+	// this run included.
+	Trials       int
+	UnsealedRuns int  // runs of this strategy that read held-back data
+	Unsealed     bool // this run read held-back data
+}
+
 // WriteReport renders a backtest as a standalone HTML file.
-func WriteReport(path string, o Outcome, slip []SlippageRow) error {
+func WriteReport(path string, o Outcome, slip []SlippageRow, prov Provenance) error {
 	m := o.Metrics
 	view := struct {
+		Prov     Provenance
 		Title    string
 		Subtitle string
 		Tiles    []tile
@@ -51,6 +61,7 @@ func WriteReport(path string, o Outcome, slip []SlippageRow) error {
 		Trades   []tradeRow
 		Hidden   int
 	}{
+		Prov:  prov,
 		Title: fmt.Sprintf("%s on %s", o.Spec.Strategy, o.Spec.Underlying),
 		Subtitle: fmt.Sprintf("%s to %s, %d trading days, capital %s, params %s",
 			o.Spec.From, o.Spec.To, m.Days, rupees(o.Spec.Capital), paramText(o.Spec.Params)),
