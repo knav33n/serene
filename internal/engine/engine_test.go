@@ -11,6 +11,7 @@ import (
 	"calm/internal/cost"
 	"calm/internal/margin"
 	"calm/internal/market"
+	"calm/internal/risk"
 	"calm/internal/sim"
 	"calm/internal/strategy"
 )
@@ -438,3 +439,91 @@ func (r *tfRecorder) OnBar(ctx strategy.Context, b market.Bar) error {
 	return nil
 }
 func (r *tfRecorder) OnFill(strategy.Context, market.Fill) error { return nil }
+
+func runGated(t *testing.T, bars []market.Bar, capital market.Paise, g *risk.Gate, s strategy.Strategy) Result {
+	t.Helper()
+	b, err := sim.New(sim.Config{Tick: 5, MaxWait: 3 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Contracts: contracts, Session: market.NSESession, Costs: cost.Zero(),
+		Margin: margin.Model{NakedPct: 10}, Capital: capital, Risk: g}
+	r, err := New(cfg, NewSliceFeed(bars), b, s).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// A short call loses Rs 6,500 when its premium rises by Rs 100. The gate then
+// refuses a new entry but lets the position be bought back.
+func TestRiskGateHaltsEntriesButNotExits(t *testing.T) {
+	bars := session(day, market.Rupees(24000), ce, pe)
+	for m := 30; m < 375; m++ {
+		at := day.At(9, 15).Add(time.Duration(m) * time.Minute)
+		replace(bars, ce.Key(), at, 20000, 20000)
+	}
+	g, err := risk.New(risk.Limits{MaxDailyLoss: market.Rupees(5000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry, exit error
+	step := 0
+	s := &script{onBar: func(ctx strategy.Context, b market.Bar) error {
+		switch {
+		case step == 0 && b.End.Equal(day.At(9, 30)):
+			step++
+			return ctx.Submit("short", market.Leg{Instrument: ce, Side: market.Sell, Lots: 1})
+		case step == 1 && b.End.Equal(day.At(10, 0)):
+			step++
+			entry = ctx.Submit("more", market.Leg{Instrument: pe, Side: market.Sell, Lots: 1})
+			exit = ctx.Submit("cover", market.Leg{Instrument: ce, Side: market.Buy, Lots: 1})
+		}
+		return nil
+	}}
+	r := runGated(t, bars, market.Rupees(1e6), g, s)
+	if !errors.Is(entry, strategy.ErrRejected) || exit != nil {
+		t.Fatalf("entry %v exit %v", entry, exit)
+	}
+	var reasons []string
+	for _, d := range r.Decisions {
+		reasons = append(reasons, d.Tag+":"+string(d.Verdict)+":"+d.Reason)
+	}
+	want := []string{"short:accepted:", "more:rejected:daily_loss", "cover:accepted:"}
+	if !reflect.DeepEqual(reasons, want) {
+		t.Fatalf("decisions %v want %v", reasons, want)
+	}
+	if halted, _ := g.Halted(day.At(11, 0)); !halted {
+		t.Fatal("halt did not latch")
+	}
+}
+
+// Buying back a short is allowed even when cash would not cover it as a new
+// position's margin.
+func TestExitIgnoresMargin(t *testing.T) {
+	bars := session(day, market.Rupees(24000), ce)
+	for m := 30; m < 375; m++ {
+		at := day.At(9, 15).Add(time.Duration(m) * time.Minute)
+		replace(bars, ce.Key(), at, 250000, 250000)
+	}
+	var cover error
+	step := 0
+	s := &script{onBar: func(ctx strategy.Context, b market.Bar) error {
+		switch {
+		case step == 0 && b.End.Equal(day.At(9, 30)):
+			step++
+			return ctx.Submit("short", market.Leg{Instrument: ce, Side: market.Sell, Lots: 1})
+		case step == 1 && b.End.Equal(day.At(10, 0)):
+			step++
+			cover = ctx.Submit("cover", market.Leg{Instrument: ce, Side: market.Buy, Lots: 1})
+		}
+		return nil
+	}}
+	// Rs 1,50,000 plus Rs 6,500 of premium covers the short's Rs 1,56,000
+	// margin. The premium then jumps to Rs 2,500, so buying back costs
+	// Rs 1,62,500, more than the cash held.
+	r := runGated(t, bars, market.Rupees(150000), nil, s)
+	if cover != nil || len(r.Orders) != 2 {
+		t.Fatalf("cover %v orders %d decisions %+v", cover, len(r.Orders), r.Decisions)
+	}
+}

@@ -22,3 +22,13 @@ sim:
 
 margin:
   naked_pct: 12 # of index notional; an estimate, not SPAN
+
+# Optional pre-trade limits, applied in backtests as in paper and live. Exits
+# are never refused. Leave the block out to check margin only.
+# risk:
+#   max_daily_loss: 20000 # rupees, net of charges and marked to market
+#   max_lots_per_leg: 2
+#   max_open_lots: 4
+#   max_orders_per_minute: 10
+#   max_quote_age_seconds: 120
+#   max_limit_away_pct: 20

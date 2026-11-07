@@ -28,6 +28,7 @@ import (
 	"calm/internal/market"
 	"calm/internal/nse"
 	"calm/internal/regime"
+	"calm/internal/risk"
 	"calm/internal/sim"
 	"calm/internal/slack"
 	"calm/internal/strategy"
@@ -78,6 +79,15 @@ type config struct {
 	Margin struct {
 		NakedPct float64 `yaml:"naked_pct"`
 	} `yaml:"margin"`
+	// Risk is optional: without it, runs check margin only.
+	Risk *struct {
+		MaxDailyLoss       float64 `yaml:"max_daily_loss"` // rupees
+		MaxLotsPerLeg      int64   `yaml:"max_lots_per_leg"`
+		MaxOpenLots        int64   `yaml:"max_open_lots"`
+		MaxOrdersPerMinute int     `yaml:"max_orders_per_minute"`
+		MaxQuoteAgeSeconds int     `yaml:"max_quote_age_seconds"`
+		MaxLimitAwayPct    float64 `yaml:"max_limit_away_pct"`
+	} `yaml:"risk"`
 	Sweep struct {
 		Metric string               `yaml:"metric"`
 		Grid   map[string][]float64 `yaml:"grid"`
@@ -906,9 +916,18 @@ func loadConfig(path string) (config, analytics.Spec, error) {
 	if c.Capital <= 0 {
 		return c, analytics.Spec{}, errors.New("capital must be positive")
 	}
-	return c, analytics.Spec{Strategy: c.Strategy, Underlying: c.Underlying, Params: c.Params,
+	spec := analytics.Spec{Strategy: c.Strategy, Underlying: c.Underlying, Params: c.Params,
 		From: from, To: to, Capital: market.Rupees(c.Capital), Sim: simCfg,
-		Margin: margin.Model{NakedPct: c.Margin.NakedPct}, Costs: costs}, nil
+		Margin: margin.Model{NakedPct: c.Margin.NakedPct}, Costs: costs}
+	if r := c.Risk; r != nil {
+		spec.Risk = &risk.Limits{MaxDailyLoss: market.Rupees(r.MaxDailyLoss), MaxLotsPerLeg: r.MaxLotsPerLeg,
+			MaxOpenLots: r.MaxOpenLots, MaxOrdersPerMinute: r.MaxOrdersPerMinute,
+			MaxQuoteAge: time.Duration(r.MaxQuoteAgeSeconds) * time.Second, MaxLimitAwayPct: r.MaxLimitAwayPct}
+		if _, err := risk.New(*spec.Risk); err != nil {
+			return c, analytics.Spec{}, err
+		}
+	}
+	return c, spec, nil
 }
 
 func runResearch(ctx context.Context, action, path, holdoutPath string, unseal bool) error {

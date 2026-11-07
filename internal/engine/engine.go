@@ -16,6 +16,7 @@ import (
 	"calm/internal/market"
 	"calm/internal/oms"
 	"calm/internal/portfolio"
+	"calm/internal/risk"
 	"calm/internal/strategy"
 )
 
@@ -31,6 +32,8 @@ type Config struct {
 	RunID string
 	// Product is what every order is placed as; Carry when empty.
 	Product market.Product
+	// Risk is the pre-trade gate. Nil means no limits beyond margin.
+	Risk *risk.Gate
 }
 
 // EquityPoint is end-of-day equity.
@@ -99,6 +102,7 @@ type Engine struct {
 	nextID    int64
 	res       Result
 	peak      market.Paise
+	dayStart  market.Paise // equity at the start of the current day
 }
 
 // New builds an engine.
@@ -111,6 +115,7 @@ func New(cfg Config, feed Feed, b broker.Broker, s strategy.Strategy) *Engine {
 		indexKey:  map[string]string{},
 		port:      portfolio.New(cfg.Capital),
 		peak:      cfg.Capital,
+		dayStart:  cfg.Capital,
 	}
 	for _, c := range cfg.Contracts {
 		e.contracts[c.Underlying] = append(e.contracts[c.Underlying], c)
@@ -152,6 +157,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 				}
 			}
 			e.day = d
+			e.dayStart = e.port.Equity(e.mark)
 		}
 		if err := e.minute(ctx, batch); err != nil {
 			return e.res, fmt.Errorf("at %s: %w", batch.Time.In(market.IST), err)
@@ -397,9 +403,14 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 		return fmt.Errorf("order %q has no legs", tag)
 	}
 	held := map[string]*margin.Holding{}
+	gateHeld := map[string]risk.Holding{}
 	for _, p := range e.port.Positions() {
 		held[p.Instrument.Key()] = &margin.Holding{Instrument: p.Instrument, Qty: p.Qty}
+		gateHeld[p.Instrument.Key()] = risk.Holding{Qty: p.Qty, LotSize: p.Instrument.LotSize}
 	}
+	// An exit is never refused for margin or by the gate: refusing it would
+	// trap the risk it was sent to remove.
+	exit := risk.IsExit(gateHeld, legs)
 	var premium market.Paise
 	for _, l := range legs {
 		key := l.Instrument.Key()
@@ -421,8 +432,15 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 	if err != nil {
 		return err
 	}
-	if e.port.Cash+premium-req < 0 {
+	if !exit && e.port.Cash+premium-req < 0 {
 		return e.reject(tag, "margin", fmt.Sprintf("margin %s exceeds available cash", req))
+	}
+	if e.cfg.Risk != nil {
+		v := e.cfg.Risk.Check(risk.State{Now: e.now, DayStartEquity: e.dayStart,
+			Equity: e.port.Equity(e.mark), Held: gateHeld, Last: e.Last}, legs)
+		if !v.Allowed {
+			return e.reject(tag, v.Reason, v.Detail)
+		}
 	}
 	kind, err := orderKind(legs)
 	if err != nil {
