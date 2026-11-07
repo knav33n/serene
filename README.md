@@ -80,6 +80,42 @@ A full download takes hours. If the token expires or the job stops, run
 `calm auth`, then the same command, and it carries on. To backtest on this data,
 set `data_dir: data/upstox` in your config.
 
+## Daily market report
+
+Stores every Nifty index from NSE's daily file and reports which sectors are
+moving and what regime the market is in. It needs no broker login.
+
+```sh
+./calm market fetch               # backfills from 2012, safe to rerun
+./calm market report              # writes reports/market/DATE.html
+./calm market check               # data integrity and regime history
+./calm market daily --slack       # fetch, report and post once per close
+```
+
+NSE publishes the file about 23:20 IST. To run it at 09:00 IST on Tuesday to
+Saturday, and at next boot if the machine was off:
+
+```sh
+cp deploy/calm-market.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now calm-market.timer
+```
+
+Slack needs `SLACK_TOKEN` and `SLACK_CHANNEL` in `.env`, and the app needs
+`chat:write` and `files:write`. Each close posts one message: a chart card and the
+full HTML report. The card is rendered with headless Chrome or Chromium, and if that
+fails the summary goes out as text with an alert. Other failures post to Slack too.
+
+The regime is **Bull**, **Neutral** or **Bear**, from seven checks on Nifty 500
+scored -7 to +7. It enters Bull at +4 and Bear at -4, leaves at +1 and -1, and
+changes only after 5 straight closes.
+
+Read it as a description. It lags turns: in four of the five big falls since 2015
+it left Bull 9-11% below the peak, and it confirmed Bear late, at -37% in March 2020 and on
+the low in February 2025. Bear days were followed by gains more often than not, so
+it's no signal to sell. Thresholds were set before looking at results, apart from
+the exit rule, and five falls can't validate them.
+
 ## Writing a strategy
 
 Implement `strategy.Strategy` in `internal/strategies`, and add it to the

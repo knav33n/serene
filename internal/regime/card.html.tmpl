@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Market card</title>
+<style>
+* { box-sizing: border-box; }
+html, body { margin: 0; width: {{.Width}}px; height: {{.Height}}px; overflow: hidden; }
+body { background: #fcfcfb; color: #0b0b0b; font: 15px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 28px 32px; }
+.top { display: flex; align-items: center; gap: 14px; }
+.pill { color: #fff; font-size: 30px; font-weight: 700; padding: 4px 18px; border-radius: 8px; }
+.pill.Bull { background: #0a8a0a; } .pill.Bear { background: #d03b3b; } .pill.Neutral { background: #52514e; }
+.score { font-size: 24px; font-weight: 600; }
+.score span { color: #52514e; font-size: 16px; font-weight: 400; }
+.date { margin-left: auto; color: #52514e; font-size: 16px; }
+.alert { margin-top: 12px; padding: 8px 12px; border-radius: 6px; background: #f3f2ef; border-left: 4px solid #d03b3b; font-weight: 600; }
+.alert.watch { border-left-color: #fab219; }
+.scale { position: relative; height: 12px; margin: 22px 0 6px; border-radius: 3px; overflow: hidden; display: flex; }
+.scale i { display: block; height: 100%; }
+.bearz { width: 21.43%; background: #f6c8c7; } .neutz { width: 57.14%; background: #f0efec; } .bullz { width: 21.43%; background: #c5e6c5; }
+.markwrap { position: relative; height: 0; }
+.mark { position: absolute; top: -30px; width: 4px; height: 24px; margin-left: -2px; background: #0b0b0b; border-radius: 2px; }
+.ticks { position: relative; height: 18px; color: #52514e; font-size: 13px; }
+.ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.ticks span:first-child { transform: none; } .ticks span:last-child { transform: translateX(-100%); }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; }
+.tile { background: #f3f2ef; border-radius: 8px; padding: 10px 14px; height: 92px; }
+.tile label { color: #52514e; font-size: 13px; display: block; }
+.tile b { font-size: 25px; display: block; line-height: 1.25; }
+.tile span { color: #52514e; font-size: 13px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 20px; }
+h2 { font-size: 16px; margin: 0 0 8px; }
+.bar { display: grid; grid-template-columns: 195px 1fr; align-items: center; height: 27px; font-size: 14px; }
+.bar .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px; }
+.track { position: relative; height: 16px; }
+.track::before { content: ""; position: absolute; left: 50%; top: -6px; bottom: -6px; width: 1px; background: #c3c2b7; }
+.fill { position: absolute; top: 1px; height: 14px; }
+.fill.up { left: 50%; background: #2a78d6; border-radius: 0 4px 4px 0; }
+.fill.down { right: 50%; background: #e34948; border-radius: 4px 0 0 4px; }
+.val { position: absolute; font-size: 13px; top: -2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track.up .val { right: 50%; margin-right: 6px; }
+.track.down .val { left: 50%; margin-left: 6px; }
+.sep { height: 7px; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; border-bottom: 1px solid #c3c2b7; }
+.axis { display: flex; justify-content: space-between; color: #52514e; font-size: 13px; margin-top: 3px; }
+.key { display: flex; gap: 12px; color: #52514e; font-size: 13px; }
+.key i { display: inline-block; width: 12px; height: 10px; margin-right: 4px; border-radius: 2px; border: 1px solid #c3c2b7; }
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 16px; margin-top: 14px; font-size: 14px; }
+.check { display: flex; align-items: center; gap: 8px; }
+.check b { width: 20px; height: 20px; border-radius: 4px; text-align: center; line-height: 20px; font-size: 14px; }
+.plus { background: #0a8a0a; color: #fff; } .minus { background: #d03b3b; color: #fff; } .flat { background: #e1e0d9; color: #52514e; }
+.rot { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 18px; font-size: 14px; }
+.rot p { margin: 0; }
+.rot b { display: block; margin-bottom: 2px; }
+.note { color: #52514e; font-size: 13px; position: absolute; left: 32px; bottom: 16px; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #0b0b0b; margin-left: 5px; vertical-align: 2px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="pill {{.State}}">{{.State}}</div>
+    <div class="score">{{.Score}} <span>of 7{{if .Direction}}, {{.Direction}}{{end}}</span></div>
+    <div class="date">Close of {{.Date}}</div>
+  </div>
+  {{range .Fresh}}<div class="alert">Regime change: {{.From}} to {{.To}}, confirmed {{.Date}}</div>{{end}}
+  {{if .Watch}}<div class="alert watch">{{.Watch}}</div>{{end}}
+
+  <div class="scale"><i class="bearz"></i><i class="neutz"></i><i class="bullz"></i></div>
+  <div class="markwrap"><div class="mark" style="left: {{.Marker}}%"></div></div>
+  <div class="ticks"><span style="left:0">-7 Bear</span><span style="left:21.43%">-4</span><span style="left:50%">0</span><span style="left:78.57%">+4</span><span style="left:100%">Bull +7</span></div>
+
+  <div class="tiles">
+    <div class="tile"><label>Nifty 500</label><b>{{.Market}}</b><span>{{.MarketSub}}</span></div>
+    <div class="tile"><label>Small caps</label><b>{{.Small}}</b><span>{{.SmallSub}}</span></div>
+    <div class="tile"><label>Breadth</label><b>{{.Breadth}}</b><span>{{.BreadthSub}}</span></div>
+    <div class="tile"><label>P/E</label><b>{{.PE}}</b><span>{{.PESub}}</span></div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <h2>Sectors today</h2>
+      {{range .Top}}<div class="bar"><div class="n">{{.Name}}{{if .Unusual}}<i class="dot"></i>{{end}}</div><div class="track {{if .Up}}up{{else}}down{{end}}"><div class="fill {{if .Up}}up{{else}}down{{end}}" style="width: {{.Width}}%"></div><div class="val">{{.Value}}</div></div></div>{{end}}
+      <div class="sep"></div>
+      {{range .Bottom}}<div class="bar"><div class="n">{{.Name}}{{if .Unusual}}<i class="dot"></i>{{end}}</div><div class="track {{if .Up}}up{{else}}down{{end}}"><div class="fill {{if .Up}}up{{else}}down{{end}}" style="width: {{.Width}}%"></div><div class="val">{{.Value}}</div></div></div>{{end}}
+    </div>
+    <div>
+      <h2>Nifty 500, last year {{.YearChange}}</h2>
+      <div class="chart"><svg viewBox="0 0 {{.ChartW}} {{.ChartH}}" role="img" aria-label="Nifty 500 over the last year with regime bands">
+        {{$h := .ChartH}}{{range .Bands}}<rect x="{{.X}}" y="0" width="{{.W}}" height="{{$h}}" fill="{{if .Bull}}#e3f3e3{{else}}#fbe4e3{{end}}"></rect>{{end}}
+        <path d="{{.Spark}}" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"></path>
+      </svg></div>
+      <div class="axis"><span>Range {{.Lo}} to {{.Hi}}</span><span class="key"><span><i style="background:#e3f3e3"></i>Bull</span><span><i style="background:#fbe4e3"></i>Bear</span><span><i></i>Neutral</span></span></div>
+      <h2 style="margin-top:16px">Regime checks</h2>
+      <div class="checks" style="margin-top:0">{{range .Checks}}<div class="check"><b class="{{.Class}}">{{.Glyph}}</b>{{.Name}}</div>{{end}}</div>
+    </div>
+  </div>
+
+  <div class="rot">
+    <p><b>New in Leading this week</b>{{if .Leading}}{{range $i, $n := .Leading}}{{if $i}}, {{end}}{{$n}}{{end}}{{else}}None{{end}}</p>
+    <p><b>New in Lagging this week</b>{{if .Lagging}}{{range $i, $n := .Lagging}}{{if $i}}, {{end}}{{$n}}{{end}}{{else}}None{{end}}</p>
+  </div>
+  <div class="note">{{if .AnyUnusual}}<i class="dot" style="margin:0 5px 0 0"></i>Unusual move for this sector. {{end}}Describes the market, doesn't predict it. Full tables in the attached report.</div>
+</body>
+</html>

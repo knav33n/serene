@@ -1,0 +1,411 @@
+# NSE publishes these in ind_close_all_DDMMYYYY.csv. Groups follow niftyindices.com.
+# breadth: true marks the non-overlapping sectors the regime's breadth check counts,
+# so Bank and Private Bank don't count twice.
+# Aliases are earlier published names. Each must be proved by `calm market check`,
+# because a wrong one shows up there as a level jump. Case and spacing don't matter.
+indices:
+  - name: "Nifty 50"
+    group: broad
+    aliases: ["S&P CNX Nifty", "CNX Nifty"]
+  - name: "Nifty Next 50"
+    group: broad
+    aliases: ["CNX Nifty Junior"]
+  - name: "Nifty 100"
+    group: broad
+    aliases: ["CNX 100"]
+  - name: "Nifty 200"
+    group: broad
+    aliases: ["CNX 200"]
+  - name: "Nifty 500"
+    group: broad
+    aliases: ["S&P CNX 500", "CNX 500"]
+  - name: "Nifty Midcap 50"
+    group: broad
+  - name: "NIFTY Midcap 100"
+    group: broad
+    aliases: ["CNX Midcap", "Nifty Free Float Midcap 100"]
+  - name: "NIFTY Smallcap 100"
+    group: broad
+    aliases: ["CNX Smallcap", "Nifty Free Float Smallcap 100"]
+  - name: "Nifty Smallcap 250"
+    group: broad
+  - name: "Nifty Smallcap 50"
+    group: broad
+  - name: "Nifty Midcap 150"
+    group: broad
+  - name: "Nifty Midcap Select"
+    group: broad
+  - name: "NIFTY LargeMidcap 250"
+    group: broad
+  - name: "Nifty500 Multicap 50:25:25"
+    group: broad
+  - name: "Nifty Microcap 250"
+    group: broad
+  - name: "Nifty Total Market"
+    group: broad
+  - name: "Nifty500 LargeMidSmall Equal-Cap Weighted"
+    group: broad
+  - name: "Nifty MidSmallcap 400"
+    group: broad
+  - name: "Nifty Next 100"
+    group: broad
+  - name: "Nifty India FPI 150"
+    group: broad
+  - name: "Nifty Smallcap 500"
+    group: broad
+  - name: "Nifty MidSmallcap400 50:50"
+    group: broad
+  - name: "Nifty Auto"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX Auto"]
+  - name: "Nifty Bank"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX Bank"]
+  - name: "Nifty Financial Services"
+    group: sectoral
+    aliases: ["CNX Finance"]
+  - name: "Nifty FMCG"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX FMCG"]
+  - name: "Nifty IT"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX IT"]
+  - name: "Nifty Media"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX Media"]
+  - name: "Nifty Metal"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX Metal"]
+  - name: "Nifty Pharma"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX Pharma"]
+  - name: "Nifty PSU Bank"
+    group: sectoral
+    aliases: ["CNX PSU Bank"]
+  - name: "Nifty Realty"
+    group: sectoral
+    breadth: true
+    aliases: ["CNX Realty"]
+  - name: "Nifty Private Bank"
+    group: sectoral
+  - name: "Nifty Oil & Gas"
+    group: sectoral
+  - name: "Nifty Financial Services 25/50"
+    group: sectoral
+  - name: "Nifty Healthcare Index"
+    group: sectoral
+  - name: "Nifty Financial Services Ex-Bank"
+    group: sectoral
+    breadth: true
+  - name: "Nifty MidSmall Financial Services"
+    group: sectoral
+  - name: "Nifty MidSmall Healthcare"
+    group: sectoral
+  - name: "Nifty MidSmall IT & Telecom"
+    group: sectoral
+  - name: "Nifty Consumer Durables"
+    group: sectoral
+    breadth: true
+  - name: "Nifty Chemicals"
+    group: sectoral
+  - name: "Nifty Commercial & Transport Services"
+    group: sectoral
+  - name: "Nifty NBFC"
+    group: sectoral
+  - name: "Nifty Cement"
+    group: sectoral
+  - name: "Nifty REITs & Realty"
+    group: sectoral
+  - name: "Nifty Construction"
+    group: sectoral
+  - name: "Nifty Hospitals"
+    group: sectoral
+  - name: "Nifty Housing Finance"
+    group: sectoral
+  - name: "Nifty Power"
+    group: sectoral
+  - name: "Nifty Retail"
+    group: sectoral
+  - name: "Nifty Insurance"
+    group: sectoral
+  - name: "Nifty500 Healthcare"
+    group: sectoral
+  - name: "Nifty Consumer Services"
+    group: sectoral
+  - name: "Nifty Capital Goods"
+    group: sectoral
+    breadth: true
+  - name: "Nifty Telecommunications"
+    group: sectoral
+  - name: "Nifty Energy"
+    group: thematic
+    breadth: true
+    aliases: ["CNX Energy"]
+  - name: "Nifty MNC"
+    group: thematic
+    aliases: ["CNX MNC"]
+  - name: "Nifty India Consumption"
+    group: thematic
+    aliases: ["CNX Consumption"]
+  - name: "Nifty Commodities"
+    group: thematic
+    aliases: ["CNX Commodities"]
+  - name: "Nifty Infrastructure"
+    group: thematic
+    aliases: ["CNX Infrastructure"]
+  - name: "Nifty PSE"
+    group: thematic
+    aliases: ["CNX PSE"]
+  - name: "Nifty Services Sector"
+    group: thematic
+    aliases: ["CNX Service Sector"]
+  - name: "Nifty50 Shariah"
+    group: thematic
+    aliases: ["S&P CNX Nifty Shariah", "CNX Nifty Shariah"]
+  - name: "Nifty500 Shariah"
+    group: thematic
+    aliases: ["S&P CNX 500 Shariah", "CNX 500 Shariah"]
+  - name: "Nifty CPSE"
+    group: thematic
+    aliases: ["CPSE"]
+  - name: "Nifty Shariah 25"
+    group: thematic
+    aliases: ["CNX Shariah25"]
+  - name: "Nifty India Corporate Group Index - Mahindra Group"
+    group: thematic
+    aliases: ["Nifty Mahindra Group"]
+  - name: "Nifty India Corporate Group Index - Aditya Birla Group"
+    group: thematic
+    aliases: ["Nifty Aditya Birla Group"]
+  - name: "Nifty India Corporate Group Index - Tata Group"
+    group: thematic
+    aliases: ["Nifty Tata Group"]
+  - name: "Nifty India Corporate Group Index - Tata Group 25% Cap"
+    group: thematic
+    aliases: ["Nifty Tata Group 25% Cap"]
+  - name: "NIFTY SME EMERGE"
+    group: thematic
+  - name: "Nifty India Digital"
+    group: thematic
+  - name: "Nifty Mobility"
+    group: thematic
+  - name: "Nifty India Defence"
+    group: thematic
+  - name: "Nifty Housing"
+    group: thematic
+  - name: "Nifty Transportation & Logistics"
+    group: thematic
+  - name: "Nifty MidSmall India Consumption"
+    group: thematic
+  - name: "Nifty REITs & InvITs"
+    group: thematic
+  - name: "Nifty Core Housing"
+    group: thematic
+  - name: "Nifty500 Multicap Infrastructure 50:30:20"
+    group: thematic
+  - name: "Nifty Rural"
+    group: thematic
+  - name: "Nifty Capital Markets"
+    group: thematic
+  - name: "Nifty India New Age Consumption"
+    group: thematic
+  - name: "Nifty India Select 5 Corporate Groups (MAATR)"
+    group: thematic
+  - name: "Nifty India Railways PSU"
+    group: thematic
+  - name: "Nifty Non-Cyclical Consumer"
+    group: thematic
+  - name: "Nifty500 Multicap India Manufacturing 50:30:20"
+    group: thematic
+  - name: "Nifty EV & New Age Automotive"
+    group: thematic
+  - name: "Nifty India Tourism"
+    group: thematic
+  - name: "Nifty IPO"
+    group: thematic
+  - name: "Nifty India Internet"
+    group: thematic
+    aliases: ["Nifty India Internet & E-Commerce"]
+  - name: "Nifty Conglomerate 50"
+    group: thematic
+  - name: "Nifty India Infrastructure & Logistics"
+    group: thematic
+  - name: "Nifty Small Finance Banks & Microfinance Institutions"
+    group: thematic
+  - name: "Nifty Waves"
+    group: thematic
+  - name: "Nifty Sugar & Ethanol"
+    group: thematic
+  - name: "Nifty500 Ahimsa"
+    group: thematic
+  - name: "Nifty REITs & InvITs 90:10"
+    group: thematic
+  - name: "Nifty AI Catalysts"
+    group: thematic
+  - name: "Nifty India Manufacturing"
+    group: thematic
+  - name: "Nifty100 ESG Sector Leaders"
+    group: thematic
+  - name: "NIFTY100 ESG"
+    group: thematic
+  - name: "NIFTY100 Enhanced ESG"
+    group: thematic
+  - name: "Nifty India Defence Equal Weight"
+    group: thematic
+  - name: "Nifty Dividend Opportunities 50"
+    group: strategy
+    aliases: ["CNX Dividend Opportunities"]
+  - name: "Nifty Low Volatility 50"
+    group: strategy
+    aliases: ["CNX Low Volatility"]
+  - name: "Nifty Alpha 50"
+    group: strategy
+    aliases: ["CNX Alpha Index"]
+  - name: "Nifty High Beta 50"
+    group: strategy
+    aliases: ["CNX High Beta"]
+  - name: "Nifty100 Equal Weight"
+    group: strategy
+    aliases: ["CNX 100 Equal Weight"]
+  - name: "Nifty100 Liquid 15"
+    group: strategy
+    aliases: ["LIX 15"]
+  - name: "Nifty50 Value 20"
+    group: strategy
+    aliases: ["NV 20"]
+  - name: "Nifty Midcap Liquid 15"
+    group: strategy
+    aliases: ["LIX15 Midcap"]
+  - name: "Nifty Growth Sectors 15"
+    group: strategy
+    aliases: ["NI15"]
+  - name: "NIFTY100 Quality 30"
+    group: strategy
+    aliases: ["NSE Quality 30", "Nifty Quality 30"]
+  - name: "Nifty500 Quality 50"
+    group: strategy
+  - name: "Nifty500 Growth 50"
+    group: strategy
+  - name: "Nifty100 Low Volatility 30"
+    group: strategy
+  - name: "NIFTY Quality Low-Volatility 30"
+    group: strategy
+  - name: "NIFTY Alpha Quality Low-Volatility 30"
+    group: strategy
+  - name: "NIFTY Alpha Quality Value Low-Volatility 30"
+    group: strategy
+  - name: "NIFTY200 Quality 30"
+    group: strategy
+  - name: "NIFTY Midcap150 Quality 50"
+    group: strategy
+  - name: "Nifty200 Momentum 30"
+    group: strategy
+  - name: "Nifty200 Alpha 30"
+    group: strategy
+  - name: "Nifty Midcap150 Momentum 50"
+    group: strategy
+  - name: "Nifty Smallcap250 Quality 50"
+    group: strategy
+  - name: "Nifty Smallcap250 Momentum Quality 100"
+    group: strategy
+  - name: "Nifty MidSmallcap400 Momentum Quality 100"
+    group: strategy
+  - name: "Nifty500 Momentum 50"
+    group: strategy
+  - name: "Nifty200 Value 30"
+    group: strategy
+  - name: "Nifty Top 10 Equal Weight"
+    group: strategy
+  - name: "Nifty500 Multicap Momentum Quality 50"
+    group: strategy
+  - name: "Nifty Top 15 Equal Weight"
+    group: strategy
+  - name: "Nifty Top 20 Equal Weight"
+    group: strategy
+  - name: "Nifty500 Low Volatility 50"
+    group: strategy
+  - name: "NIFTY500 Value 50"
+    group: strategy
+  - name: "NIFTY100 Alpha 30"
+    group: strategy
+  - name: "Nifty500 Multifactor MQVLv 50"
+    group: strategy
+  - name: "NIFTY Alpha Low-Volatility 30"
+    group: strategy
+  - name: "Nifty500 Flexicap Quality 30"
+    group: strategy
+  - name: "Nifty Total Market Momentum Quality 50"
+    group: strategy
+  - name: "Nifty High Dividend Yield 15"
+    group: strategy
+  - name: "Nifty500 Equal Weight"
+    group: strategy
+  - name: "NIFTY50 Equal Weight"
+    group: strategy
+  - name: "Nifty50 Dividend Points"
+    group: other
+    aliases: ["S&P CNX Nifty Dividend", "CNX Nifty Dividend"]
+  - name: "India VIX"
+    group: other
+  - name: "Nifty50 TR 1x Inverse"
+    group: other
+    aliases: ["NIFTY TR 1X Inverse"]
+  - name: "Nifty50 TR 2x Leverage"
+    group: other
+    aliases: ["NIFTY TR 2X Leverage"]
+  - name: "Nifty50 PR 1x Inverse"
+    group: other
+    aliases: ["NIFTY PR 1X Inverse"]
+  - name: "Nifty50 PR 2x Leverage"
+    group: other
+    aliases: ["NIFTY PR 2x Leverage"]
+  - name: "Nifty 50 Futures Index"
+    group: other
+  - name: "Nifty 50 Arbitrage"
+    group: other
+  - name: "Nifty 50 Futures TR Index"
+    group: other
+  - name: "Nifty 8-13 yr G-Sec"
+    group: other
+  - name: "Nifty 4-8 yr G-Sec Index"
+    group: other
+  - name: "Nifty 11-15 yr G-Sec Index"
+    group: other
+  - name: "Nifty 15 yr and above G-Sec Index"
+    group: other
+  - name: "Nifty Composite G-sec Index"
+    group: other
+  - name: "Nifty 10 yr Benchmark G-Sec"
+    group: other
+    aliases: ["GSECBM NSE Index"]
+  - name: "Nifty 10 yr Benchmark G-Sec (Clean Price)"
+    group: other
+    aliases: ["NSE GSECBM Clean Price Index"]
+  - name: "Nifty BHARAT Bond Index - April 2030"
+    group: other
+  - name: "Nifty BHARAT Bond Index - April 2031"
+    group: other
+  - name: "Nifty BHARAT Bond Index - April 2032"
+    group: other
+  - name: "Nifty BHARAT Bond Index - April 2033"
+    group: other
+  - name: "Nifty 1D Rate Index"
+    group: other
+  - name: "Nifty50 USD"
+    group: other
+  # Discontinued series, kept so old files resolve. The Full 100s are a different
+  # index from NIFTY Midcap 100 and Smallcap 100, on a different level.
+  - {name: "Nifty Full Midcap 100", group: other}
+  - {name: "Nifty Full Smallcap 100", group: other}
+  - {name: "CNX DEFTY", group: other}
+  - {name: "S&P ESG India", group: other}
+  - {name: "GSEC10 NSE Index", group: other}
+  - {name: "Nifty BHARAT Bond Index - April 2025", group: other}
+  - {name: "Nifty100 ESG Sector Leaders - Old", group: other}

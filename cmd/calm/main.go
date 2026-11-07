@@ -6,11 +6,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -24,7 +26,10 @@ import (
 	"calm/internal/ingest"
 	"calm/internal/margin"
 	"calm/internal/market"
+	"calm/internal/nse"
+	"calm/internal/regime"
 	"calm/internal/sim"
+	"calm/internal/slack"
 	"calm/internal/strategy"
 	"calm/internal/synth"
 	"calm/internal/upstox"
@@ -44,6 +49,11 @@ const usage = `calm researches and trades Indian index options.
 
   calm research fetch       [--underlying NIFTY] [--from DATE] [--to DATE] [--band-pct 5] [--data DIR]
   calm research coverage    [--underlying NIFTY] [--data DIR]
+
+  calm market fetch         [--from DATE] [--to DATE] [--rebuild] [--data DIR] [--catalog FILE]
+  calm market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
+  calm market daily         [--slack] [--data DIR] [--catalog FILE] [--reports DIR]
+  calm market check         [--data DIR] [--catalog FILE]
 
 Not built yet:
   calm prod paper, calm prod live
@@ -113,6 +123,14 @@ func run(ctx context.Context, args []string) error {
 		return runFetch(ctx, rest)
 	case "research coverage":
 		return runCoverage(ctx, rest)
+	case "market fetch":
+		return runMarketFetch(ctx, rest)
+	case "market report":
+		return runMarketReport(ctx, rest)
+	case "market daily":
+		return runMarketDaily(ctx, rest)
+	case "market check":
+		return runMarketCheck(ctx, rest)
 	case "prod paper", "prod live":
 		return fmt.Errorf("%q is not built yet", cmd)
 	}
@@ -212,6 +230,522 @@ func runCoverage(ctx context.Context, args []string) error {
 	fmt.Printf("Days with options but no index: %s\n", listOrNone(cov.NoIndex))
 	fmt.Printf("Days with a short index session: %s\n", listOrNone(cov.Short))
 	return nil
+}
+
+// marketFirstDay is before the earliest published index file, so a backfill
+// finds the true start for itself.
+const marketFirstDay = "2012-01-01"
+
+func marketLog(format string, a ...any) {
+	fmt.Printf("%s "+format+"\n", append([]any{time.Now().In(market.IST).Format("15:04:05")}, a...)...)
+}
+
+func runMarketFetch(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("market fetch", flag.ContinueOnError)
+	from := fs.String("from", marketFirstDay, "first date")
+	to := fs.String("to", "", "last date, default today")
+	rebuild := fs.Bool("rebuild", false, "skip the download and rebuild the store from the raw files")
+	dir := fs.String("data", "data/market", "data directory")
+	catalog := fs.String("catalog", "configs/indices.yaml", "index catalog")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cat, err := nse.LoadCatalog(*catalog)
+	if err != nil {
+		return err
+	}
+	store, err := data.Open(*dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	var years []int
+	if *rebuild {
+		dates, err := nse.RawDates(*dir)
+		if err != nil {
+			return err
+		}
+		years = nse.Years(dates)
+	} else {
+		f, err := market.ParseDate(*from)
+		if err != nil {
+			return err
+		}
+		t := market.DateOf(time.Now())
+		if *to != "" {
+			if t, err = market.ParseDate(*to); err != nil {
+				return err
+			}
+		}
+		res, err := nse.Download(ctx, nse.Config{Dir: *dir, From: f, To: t, Log: marketLog}, nse.New())
+		if err != nil {
+			return err
+		}
+		years = nse.Years(append(res.New, res.Changed...))
+	}
+	unknown, err := nse.Rebuild(ctx, *dir, cat, store, years)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("stored %d years. Names not in the catalog: %s\n", len(years), listOrNone(unknown))
+	return nil
+}
+
+func marketMeta(cat *nse.Catalog) func(string) regime.Meta {
+	return func(name string) regime.Meta {
+		if e, ok := cat.Lookup(name); ok {
+			return regime.Meta{Group: e.Group, Breadth: e.Breadth}
+		}
+		return regime.Meta{}
+	}
+}
+
+func loadIndexRows(ctx context.Context, store *data.Store) ([]market.IndexDay, error) {
+	return store.IndexDays(ctx, market.Date{Year: 2000, Month: 1, Day: 1}, market.DateOf(time.Now()))
+}
+
+func marketSnapshot(ctx context.Context, store *data.Store, cat *nse.Catalog, asOf, lastSent market.Date) (*regime.Snapshot, error) {
+	rows, err := loadIndexRows(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	p := regime.NewPanel(rows, marketMeta(cat))
+	return regime.Build(p, asOf, lastSent, nse.GroupSectoral, nse.GroupBroad)
+}
+
+func marketReportPath(dir string, d market.Date) string {
+	return filepath.Join(dir, "market", d.String()+".html")
+}
+
+func runMarketReport(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("market report", flag.ContinueOnError)
+	date := fs.String("date", "", "report date, default the latest close")
+	dir := fs.String("data", "data/market", "data directory")
+	catalog := fs.String("catalog", "configs/indices.yaml", "index catalog")
+	reports := fs.String("reports", "reports", "report directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cat, err := nse.LoadCatalog(*catalog)
+	if err != nil {
+		return err
+	}
+	asOf := market.DateOf(time.Now())
+	if *date != "" {
+		if asOf, err = market.ParseDate(*date); err != nil {
+			return err
+		}
+	}
+	store, err := data.Open(*dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	s, err := marketSnapshot(ctx, store, cat, asOf, asOf)
+	if err != nil {
+		return err
+	}
+	path := marketReportPath(*reports, s.Date)
+	if err := regime.WriteReport(path, s); err != nil {
+		return err
+	}
+	fmt.Println(strings.ReplaceAll(s.Summary(), "*", ""))
+	fmt.Println("report:", path)
+	card, err := renderCard(ctx, path, s)
+	if err != nil {
+		return err
+	}
+	fmt.Println("card:", card)
+	return nil
+}
+
+// slackDM is a Slack client aimed at one conversation.
+type slackDM struct {
+	client  *slack.Client
+	channel string
+}
+
+func openSlack(ctx context.Context) (*slackDM, error) {
+	if err := auth.LoadDotEnv(".env"); err != nil {
+		return nil, err
+	}
+	token, target := os.Getenv("SLACK_TOKEN"), os.Getenv("SLACK_CHANNEL")
+	if token == "" || target == "" {
+		return nil, errors.New("--slack needs SLACK_TOKEN and SLACK_CHANNEL in .env")
+	}
+	c := slack.New(token)
+	channel, err := c.Resolve(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	return &slackDM{c, channel}, nil
+}
+
+func runMarketDaily(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("market daily", flag.ContinueOnError)
+	useSlack := fs.Bool("slack", false, "send the report to Slack, once per close")
+	dir := fs.String("data", "data/market", "data directory")
+	catalog := fs.String("catalog", "configs/indices.yaml", "index catalog")
+	reports := fs.String("reports", "reports", "report directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	var dm *slackDM
+	if *useSlack {
+		var err error
+		if dm, err = openSlack(ctx); err != nil {
+			return err
+		}
+	}
+	err := marketDaily(ctx, *dir, *catalog, *reports, dm)
+	if err != nil && dm != nil {
+		// A broken job must not look like a quiet day.
+		text := fmt.Sprintf(":x: *calm market daily failed:* %v", err)
+		if perr := dm.client.Post(context.WithoutCancel(ctx), dm.channel, text); perr != nil {
+			fmt.Fprintln(os.Stderr, "calm: slack:", perr)
+		}
+	}
+	return err
+}
+
+func marketDaily(ctx context.Context, dir, catalog, reports string, dm *slackDM) error {
+	cat, err := nse.LoadCatalog(catalog)
+	if err != nil {
+		return err
+	}
+	store, err := data.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	first, err := market.ParseDate(marketFirstDay)
+	if err != nil {
+		return err
+	}
+	today := market.DateOf(time.Now())
+	res, err := nse.Download(ctx, nse.Config{Dir: dir, From: first, To: today, Log: marketLog}, nse.New())
+	if err != nil {
+		return err
+	}
+	unknown, err := nse.Rebuild(ctx, dir, cat, store, nse.Years(append(res.New, res.Changed...)))
+	if err != nil {
+		return err
+	}
+	dates, err := nse.RawDates(dir)
+	if err != nil {
+		return err
+	}
+	if len(dates) == 0 {
+		return errors.New("no index files stored: run calm market fetch")
+	}
+	latest := dates[len(dates)-1]
+	sent, err := nse.LoadSent(dir)
+	if err != nil {
+		return err
+	}
+	if expected := nse.ExpectedDate(today); latest.Before(expected) && sent.Noted != expected.String() {
+		text := fmt.Sprintf("No NSE index file for %s: a holiday, or the source is down. Latest close stored is %s.", expected, latest)
+		fmt.Println(text)
+		if dm != nil {
+			if err := dm.client.Post(ctx, dm.channel, text); err != nil {
+				return err
+			}
+			sent.Noted = expected.String()
+			if err := nse.SaveSent(dir, sent); err != nil {
+				return err
+			}
+		}
+	}
+	switch step := sent.Next(latest); {
+	case step == nse.Done, step == nse.AttachOnly && dm == nil:
+		fmt.Println("already reported", latest)
+		return nil
+	case step == nse.AttachOnly:
+		return attachReport(ctx, dm, dir, &sent, marketReportPath(reports, latest), latest)
+	}
+	lastSent := latest
+	if sent.Reported != "" {
+		if lastSent, err = market.ParseDate(sent.Reported); err != nil {
+			return err
+		}
+	}
+	s, err := marketSnapshot(ctx, store, cat, today, lastSent)
+	if err != nil {
+		return err
+	}
+	if len(unknown) > 0 {
+		s.Warnings = append(s.Warnings, "New index names, not in the catalog: "+strings.Join(unknown, ", "))
+	}
+	for _, d := range res.Changed {
+		s.Warnings = append(s.Warnings, fmt.Sprintf("NSE rewrote the file for %s, so the store was updated.", d))
+	}
+	path := marketReportPath(reports, s.Date)
+	if err := regime.WriteReport(path, s); err != nil {
+		return err
+	}
+	fmt.Println(strings.ReplaceAll(s.Summary(), "*", ""))
+	fmt.Println("report:", path)
+	card, cardErr := renderCard(ctx, path, s)
+	if cardErr != nil {
+		fmt.Fprintln(os.Stderr, "calm:", cardErr)
+	} else {
+		fmt.Println("card:", card)
+	}
+	if dm == nil {
+		return nil
+	}
+	if cardErr == nil {
+		err := dm.client.Upload(ctx, dm.channel, s.Brief(), reportFiles(path, s))
+		if err == nil {
+			sent.Reported, sent.Attached = s.Date.String(), s.Date.String()
+			return nse.SaveSent(dir, sent)
+		}
+		cardErr = err
+	}
+	// The market summary still goes out as text, and the alert says why.
+	if err := dm.client.Post(ctx, dm.channel, s.Summary()); err != nil {
+		return err
+	}
+	sent.Reported = s.Date.String()
+	if err := nse.SaveSent(dir, sent); err != nil {
+		return err
+	}
+	return fmt.Errorf("summary sent as text, because the card failed: %w", cardErr)
+}
+
+func cardPath(reportPath string) string { return strings.TrimSuffix(reportPath, ".html") + ".png" }
+
+// renderCard makes the image for Slack beside the report, using a scratch page.
+func renderCard(ctx context.Context, reportPath string, s *regime.Snapshot) (string, error) {
+	page := strings.TrimSuffix(reportPath, ".html") + ".card.html"
+	defer os.Remove(page)
+	if err := regime.WriteCard(page, s); err != nil {
+		return "", err
+	}
+	out := cardPath(reportPath)
+	return out, regime.RenderPNG(ctx, page, out, regime.CardHeight(s))
+}
+
+// reportFiles lists what goes to Slack. The summary doubles as the image's alt
+// text, so everything in the picture also exists as words.
+func reportFiles(path string, s *regime.Snapshot) []slack.File {
+	return []slack.File{
+		{Path: cardPath(path), Title: "Market card " + s.Date.String(), Alt: strings.ReplaceAll(s.Summary(), "*", "")},
+		{Path: path, Title: "Full report " + s.Date.String()},
+	}
+}
+
+func attachReport(ctx context.Context, dm *slackDM, dir string, sent *nse.Sent, path string, d market.Date) error {
+	files := []slack.File{{Path: path, Title: "Full report " + d.String()}}
+	if _, err := os.Stat(cardPath(path)); err == nil {
+		files = append([]slack.File{{Path: cardPath(path), Title: "Market card " + d.String(), Alt: "Market card for " + d.String()}}, files...)
+	}
+	if err := dm.client.Upload(ctx, dm.channel, "Report for "+d.String(), files); err != nil {
+		return fmt.Errorf("summary sent, but the report file failed: %w", err)
+	}
+	sent.Attached = d.String()
+	return nse.SaveSent(dir, *sent)
+}
+
+// marketWindows are the falls that the regime review measures.
+var marketWindows = []struct{ name, from, to string }{
+	{"2015-16 fall", "2015-01-01", "2016-06-30"},
+	{"2018-19 small-cap slide", "2018-01-01", "2019-12-31"},
+	{"March 2020", "2020-01-01", "2020-06-30"},
+	{"2021-22 fall", "2021-10-01", "2022-09-30"},
+	{"2024-25 fall", "2024-09-01", "2025-06-30"},
+}
+
+func sortedNames(p *regime.Panel) []string {
+	out := make([]string, 0, len(p.Series))
+	for n := range p.Series {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func dateOrDash(d market.Date) string {
+	if d.IsZero() {
+		return "-"
+	}
+	return d.String()
+}
+
+func runMarketCheck(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("market check", flag.ContinueOnError)
+	dir := fs.String("data", "data/market", "data directory")
+	catalog := fs.String("catalog", "configs/indices.yaml", "index catalog")
+	options := fs.String("options-data", "data/upstox", "options data, whose NIFTY days are compared with the index calendar")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cat, err := nse.LoadCatalog(*catalog)
+	if err != nil {
+		return err
+	}
+	store, err := data.Open(*dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	rows, err := loadIndexRows(ctx, store)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return errors.New("no index data: run calm market fetch")
+	}
+	p := regime.NewPanel(rows, marketMeta(cat))
+	first, last := p.Dates[0], p.Dates[len(p.Dates)-1]
+	fmt.Printf("%d rows, %d indices, %d trading days, %s to %s\n\n", len(rows), len(p.Series), len(p.Dates), first, last)
+
+	// Continuity proves the aliases: a wrong one shows up as a level jump.
+	// Dividend Points is a running tally and VIX publishes a different previous
+	// close, so their jumps are expected.
+	type tally struct {
+		name        string
+		count, gaps int
+		worst       float64
+		worstDate   market.Date
+		from, to    string
+	}
+	byName := map[string]*tally{}
+	var names []string
+	total, atRename := 0, 0
+	for _, b := range nse.Continuity(rows, p.Dates, 0.05) {
+		if cat.Group(b.Name) == "" || strings.Contains(b.Name, "Dividend Points") || b.Name == regime.VIX {
+			continue
+		}
+		t, ok := byName[b.Name]
+		if !ok {
+			t = &tally{name: b.Name}
+			byName[b.Name] = t
+			names = append(names, b.Name)
+		}
+		if b.Gap {
+			t.gaps++
+			continue
+		}
+		t.count++
+		total++
+		if !strings.EqualFold(b.From, b.To) {
+			atRename++
+			fmt.Printf("  rename break: %s %s stored %s published %s, %s -> %s\n", b.Date, b.Name, b.Stored, b.Said, b.From, b.To)
+		}
+		if pct := math.Abs(float64(b.Said-b.Stored)) / float64(b.Stored) * 100; pct > t.worst {
+			t.worst, t.worstDate, t.from, t.to = pct, b.Date, b.From, b.To
+		}
+	}
+	sort.Slice(names, func(i, j int) bool { return byName[names[i]].worst > byName[names[j]].worst })
+	fmt.Printf("Continuity breaks on consecutive days: %d, in %d indices. On a rename: %d\n", total, len(names), atRename)
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "index\tgroup\tbreaks\tacross gaps\tworst\ton\tnames that day")
+	for i, n := range names {
+		if i == 40 {
+			fmt.Fprintf(w, "... %d more\n", len(names)-i)
+			break
+		}
+		t := byName[n]
+		fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%.2f%%\t%s\t%s -> %s\n", n, cat.Group(n), t.count, t.gaps, t.worst, dateOrDash(t.worstDate), t.from, t.to)
+	}
+	w.Flush()
+
+	fmt.Println("\nRebases, adjusted out of history:")
+	reb := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	for _, n := range sortedNames(p) {
+		for _, r := range p.Series[n].Rebases {
+			fmt.Fprintf(reb, "%s\t%s\t×%.3f\n", r.Date, n, r.Ratio)
+		}
+	}
+	reb.Flush()
+
+	if o, err := data.Open(*options); err == nil {
+		defer o.Close()
+		days, err := o.Days("NIFTY", first, last)
+		if err != nil {
+			return err
+		}
+		stored := map[market.Date]bool{}
+		for _, d := range p.Dates {
+			stored[d] = true
+		}
+		onOptions := map[market.Date]bool{}
+		var noIndex, noOptions []string
+		for _, d := range days {
+			onOptions[d] = true
+			if !stored[d] {
+				noIndex = append(noIndex, d.String())
+			}
+		}
+		if len(days) > 0 {
+			for _, d := range p.Dates {
+				if !d.Before(days[0]) && !onOptions[d] {
+					noOptions = append(noOptions, d.String())
+				}
+			}
+		}
+		fmt.Printf("\nCalendar against %d NIFTY days. Missing from index files: %s\n", len(days), listOrNone(noIndex))
+		fmt.Printf("Index files with no NIFTY day: %s\n", listOrNone(noOptions))
+	}
+
+	days := regime.Timeline(p)
+	if len(days) == 0 {
+		return fmt.Errorf("no history for %s", regime.Market)
+	}
+	fmt.Printf("\nRegime changes, %s to %s\n", days[0].Date, days[len(days)-1].Date)
+	w = tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "date\tchange\tNifty 500\tdrawdown\tdays in previous")
+	changes := regime.Transitions(days)
+	for _, t := range changes {
+		fmt.Fprintf(w, "%s\t%s to %s\t%.0f\t%.1f%%\t%d\n", t.Date, t.From, t.To, t.Close, t.Drawdown, t.Days)
+	}
+	w.Flush()
+
+	windows := make([]regime.Window, 0, len(marketWindows))
+	for _, m := range marketWindows {
+		from, err := market.ParseDate(m.from)
+		if err != nil {
+			return err
+		}
+		to, err := market.ParseDate(m.to)
+		if err != nil {
+			return err
+		}
+		windows = append(windows, regime.Window{Name: m.name, From: from, To: to})
+	}
+	fmt.Println("\nKnown falls")
+	w = tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "episode\tpeak\ttrough\tfall\tleft Bull\tat\tentered Bear\tat\tback to Bull\tabove trough")
+	for _, e := range regime.Review(days, windows) {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%.1f%%\t%s\t%.1f%%\t%s\t%.1f%%\t%s\t%.1f%%\n", e.Name, dateOrDash(e.Peak), dateOrDash(e.Trough), e.Fall,
+			dateOrDash(e.LeftBull), e.LeftBullDD, dateOrDash(e.EnteredBear), e.BearDD, dateOrDash(e.Bull), e.BullGain)
+	}
+	w.Flush()
+
+	bearOutside := 0
+	for _, t := range changes {
+		if t.To != regime.Bear {
+			continue
+		}
+		inside := false
+		for _, win := range windows {
+			inside = inside || (!t.Date.Before(win.From) && !win.To.Before(t.Date))
+		}
+		if !inside {
+			bearOutside++
+		}
+	}
+	fmt.Printf("\nBear calls outside those falls: %d\n", bearOutside)
+
+	const forward = 63
+	fmt.Printf("\nWhat followed each state over %d trading days. In-sample and overlapping, so this describes history and proves no edge.\n", forward)
+	w = tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "state\tdays\tshare\tmean return\tpositive\tworst")
+	for _, s := range regime.Stats(days, forward) {
+		fmt.Fprintf(w, "%s\t%d\t%.0f%%\t%+.1f%%\t%.0f%%\t%+.1f%%\n", s.State, s.Days, s.Share, s.Forward, s.Positive, s.WorstNext)
+	}
+	return w.Flush()
 }
 
 func listOrNone(v []string) string {

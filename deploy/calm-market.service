@@ -1,0 +1,9 @@
+[Unit]
+Description=calm daily market report
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Workspace/calm
+ExecStart=%h/Workspace/calm/calm market daily --slack

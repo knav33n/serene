@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.V.Title}}</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb; --surface-2: #f3f2ef; --line: #e1e0d9; --axis: #c3c2b7;
+  --text: #0b0b0b; --text-2: #52514e; --muted: #898781;
+  --series: #2a78d6;
+  --bull: rgba(12,163,12,.13); --bear: rgba(208,59,59,.15);
+  --h0:#f0a9a8; --h1:#f6c8c7; --h2:#fbe4e3; --h3:#f0efec; --h4:#cde2fb; --h5:#9ec5f4; --h6:#6da7ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #1a1a19; --surface-2: #262625; --line: #2c2c2a; --axis: #383835;
+    --text: #f0efec; --text-2: #c3c2b7;
+    --series: #3987e5;
+    --bull: rgba(12,163,12,.20); --bear: rgba(208,59,59,.24);
+    --h0:#8f3434; --h1:#6b2c2c; --h2:#4a2727; --h3:#383835; --h4:#223a58; --h5:#184f95; --h6:#256abf;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #1a1a19; --surface-2: #262625; --line: #2c2c2a; --axis: #383835;
+  --text: #f0efec; --text-2: #c3c2b7;
+  --series: #3987e5;
+  --bull: rgba(12,163,12,.20); --bear: rgba(208,59,59,.24);
+  --h0:#8f3434; --h1:#6b2c2c; --h2:#4a2727; --h3:#383835; --h4:#223a58; --h5:#184f95; --h6:#256abf;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 26px; margin: 0; }
+h2 { font-size: 17px; margin: 36px 0 10px; }
+.sub, .note { color: var(--text-2); }
+.note { font-size: 13px; margin: 6px 0 0; }
+.alert { border: 1px solid var(--axis); border-left: 4px solid #d03b3b; background: var(--surface-2);
+  padding: 10px 14px; margin: 14px 0; font-weight: 600; border-radius: 4px; }
+.watch { border-left-color: #fab219; }
+.banner { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 18px; }
+.tile { background: var(--surface-2); border-radius: 6px; padding: 10px 14px; }
+.tile b { display: block; font-size: 15px; }
+.tile span { color: var(--text-2); font-size: 13px; }
+.wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--text-2); font-weight: 600; cursor: pointer; user-select: none; }
+td.left, th.left { text-align: left; }
+.h0{background:var(--h0)}.h1{background:var(--h1)}.h2{background:var(--h2)}.h3{background:var(--h3)}
+.h4{background:var(--h4)}.h5{background:var(--h5)}.h6{background:var(--h6)}
+.rot { font-weight: 600; }
+.ctrl { display: flex; gap: 6px; margin: 4px 0 8px; }
+.ctrl button { font: inherit; font-size: 13px; color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+.ctrl button[aria-pressed="true"] { border-color: var(--text-2); font-weight: 600; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--text-2); margin: 4px 0; }
+.legend i { display: inline-block; width: 14px; height: 10px; margin-right: 5px; border-radius: 2px; border: 1px solid var(--axis); }
+.tip { position: absolute; display: none; pointer-events: none; z-index: 2; background: var(--surface);
+  border: 1px solid var(--axis); border-radius: 4px; padding: 4px 8px; font-size: 13px; white-space: nowrap; }
+.tip strong { display: block; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--text-2); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Regime: {{.V.Headline}}</h1>
+  <p class="sub">Market close {{.V.Date}}</p>
+  {{range .V.Fresh}}<div class="alert">Regime change: {{.From}} to {{.To}}, confirmed {{.Date}}</div>{{end}}
+  {{if .V.Pending}}<div class="alert watch">Watch: {{.V.Target}} signal, day {{.V.Pending}} of {{.V.Confirm}} to confirm</div>{{end}}
+  {{range .V.Warnings}}<div class="alert watch">{{.}}</div>{{end}}
+
+  <div class="banner">
+    <div class="tile"><span>Nifty 500</span><b>{{.V.Market}}</b></div>
+    <div class="tile"><span>Small caps</span><b>{{.V.Small}}</b></div>
+    <div class="tile"><span>Sectors above 200-day average</span><b>{{.V.Breadth}}</b></div>
+    <div class="tile"><span>Nifty 500 P/E</span><b>{{.V.PE}}</b></div>
+  </div>
+
+  <h2>Regime checks</h2>
+  <div class="wrap"><table>
+    <tr><th>Check</th><th class="left">Reading</th><th>Score</th></tr>
+    {{range .V.Checks}}<tr><td>{{.Name}}</td><td class="left">{{.Value}}</td><td>{{if .Available}}{{printf "%+d" .Score}}{{else}}–{{end}}</td></tr>{{end}}
+  </table></div>
+  <p class="note">The state is Bull at +{{.V.Bull}} or more and Bear at {{.V.Bear}} or less, and changes only after {{.V.Confirm}} straight closes. These signals confirm after a turn: they describe the market and don't predict it.</p>
+
+  <h2>Sectors</h2>
+  <div class="wrap"><table class="sort">
+    <thead><tr><th>Index</th>{{range $.V.Horizons}}<th>{{.}} %</th>{{end}}<th>From high %</th><th class="left">200-day</th><th class="left">Rotation</th><th>Trend / momentum</th><th class="left">Flag</th></tr></thead>
+    <tbody>{{range .V.Sectors}}<tr><td>{{.Name}}</td>{{range .Cells}}<td class="{{.Class}}" data-v="{{.Sort}}">{{.Text}}</td>{{end}}<td data-v="{{.FromHigh.Sort}}">{{.FromHigh.Text}}</td><td class="left">{{.Above}}</td><td class="left{{if .Rotated}} rot{{end}}">{{.Quadrant}}</td><td>{{.Trend}}</td><td class="left">{{.Flag}}</td></tr>{{end}}</tbody>
+  </table></div>
+  <div class="legend"><span>Daily return:</span><span><i class="h0"></i>below -2%</span><span><i class="h2"></i>down</span><span><i class="h3"></i>flat</span><span><i class="h4"></i>up</span><span><i class="h6"></i>above +2%</span><span>Longer columns use wider steps. Click a heading to sort.</span></div>
+
+  <h2>Rotation against Nifty 500</h2>
+  <div class="chart" id="rotation"></div>
+  <p class="note">Right of centre, a sector is outperforming its own recent relative trend. Above centre, that relative strength is rising. Sectors usually move Improving, Leading, Weakening, then Lagging. A larger dot marks an unusual move today. The table above has every value.</p>
+
+  <h2>Broad market</h2>
+  <div class="wrap"><table class="sort">
+    <thead><tr><th>Index</th>{{range $.V.Horizons}}<th>{{.}} %</th>{{end}}<th>From high %</th><th class="left">200-day</th><th class="left">Rotation</th><th>Trend / momentum</th><th class="left">Flag</th></tr></thead>
+    <tbody>{{range .V.Broad}}<tr><td>{{.Name}}</td>{{range .Cells}}<td class="{{.Class}}" data-v="{{.Sort}}">{{.Text}}</td>{{end}}<td data-v="{{.FromHigh.Sort}}">{{.FromHigh.Text}}</td><td class="left">{{.Above}}</td><td class="left{{if .Rotated}} rot{{end}}">{{.Quadrant}}</td><td>{{.Trend}}</td><td class="left">{{.Flag}}</td></tr>{{end}}</tbody>
+  </table></div>
+
+  <h2>Regime history</h2>
+  <div class="ctrl" id="range"><button data-y="1">1Y</button><button data-y="3" aria-pressed="true">3Y</button><button data-y="5">5Y</button><button data-y="0">All</button></div>
+  <div class="legend"><span><i style="background:var(--bull)"></i>Bull</span><span><i style="background:var(--bear)"></i>Bear</span><span><i></i>Neutral</span></div>
+  <div class="chart" id="price"></div>
+  <div class="chart" id="score"></div>
+  <details><summary>Confirmed regime changes</summary>
+    <div class="wrap"><table>
+      <tr><th>Date</th><th class="left">From</th><th class="left">To</th><th>Nifty 500</th><th>Drawdown</th><th>Days in previous state</th></tr>
+      {{range .V.Transitions}}<tr><td>{{.Date}}</td><td class="left">{{.From}}</td><td class="left">{{.To}}</td><td>{{.Close}}</td><td>{{.Drawdown}}</td><td>{{.Days}}</td></tr>{{end}}
+    </table></div>
+  </details>
+  <p class="note">Index prices exclude dividends. History starts in 2012, so only a few major falls are covered.</p>
+</main>
+<script>
+const data = {{.Data}};
+const NS = "http://www.w3.org/2000/svg";
+const el = (name, attrs, parent) => {
+  const n = document.createElementNS(NS, name);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  parent.appendChild(n);
+  return n;
+};
+const label = (svg, x, y, text, anchor) => {
+  const t = el("text", { x, y, "text-anchor": anchor || "start", "font-size": 12, fill: "var(--text-2)" }, svg);
+  t.textContent = text;
+  return t;
+};
+function tipFor(root) {
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  root.appendChild(tip);
+  return (lead, rest, px, width) => {
+    if (lead === null) { tip.style.display = "none"; return; }
+    tip.replaceChildren();
+    const s = document.createElement("strong");
+    s.textContent = lead;
+    tip.append(s, rest);
+    tip.style.display = "block";
+    tip.style.left = Math.max(0, Math.min(width - tip.offsetWidth, px + 10)) + "px";
+    tip.style.top = "6px";
+  };
+}
+function bands(svg, pts, x, top, bottom) {
+  for (let i = 0; i < pts.length;) {
+    let j = i;
+    while (j + 1 < pts.length && pts[j + 1].r === pts[i].r) j++;
+    if (pts[i].r !== "Neutral") {
+      el("rect", { x: x(i), y: top, width: Math.max(1, x(j) - x(i)), height: bottom - top,
+        fill: pts[i].r === "Bull" ? "var(--bull)" : "var(--bear)" }, svg);
+    }
+    i = j + 1;
+  }
+}
+function line(id, pts, field, height, opts) {
+  const root = document.getElementById(id);
+  root.replaceChildren();
+  const W = Math.max(300, root.clientWidth), H = height, L = 56, R = 12, T = 8, B = 24;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": opts.title + "; confirmed changes are in the table below" }, root);
+  const raw = pts.map(p => p[field]);
+  const v = opts.log ? raw.map(Math.log) : raw;
+  let lo = opts.lo ?? Math.min(...v), hi = opts.hi ?? Math.max(...v);
+  const pad = opts.log ? (hi - lo) * .05 : 0; lo -= pad; hi += pad;
+  const x = i => L + (W - L - R) * i / (pts.length - 1);
+  const y = n => T + (H - T - B) * (hi - n) / (hi - lo);
+  bands(svg, pts, x, T, H - B);
+  const ticks = opts.ticks || [0, 1, 2, 3].map(i => lo + (hi - lo) * i / 3);
+  for (const t of ticks) {
+    el("line", { x1: L, x2: W - R, y1: y(t), y2: y(t), stroke: "var(--line)", "stroke-width": 1 }, svg);
+    label(svg, L - 8, y(t) + 4, opts.log ? Math.round(Math.exp(t)).toLocaleString("en-IN") : (t > 0 ? "+" : "") + t, "end");
+  }
+  const n = W < 600 ? 3 : 5;
+  for (let i = 0; i < n; i++) {
+    const k = Math.round(i * (pts.length - 1) / (n - 1));
+    label(svg, x(k), H - 6, pts[k].d.slice(0, 7), i === 0 ? "start" : i === n - 1 ? "end" : "middle");
+  }
+  const d = v.map((c, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(c).toFixed(1)}`).join("");
+  el("path", { d, fill: "none", stroke: "var(--series)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+  const hair = el("line", { y1: T, y2: H - B, stroke: "var(--text-2)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const dot = el("circle", { r: 4, fill: "var(--series)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }, svg);
+  const show = tipFor(root);
+  svg.addEventListener("pointermove", e => {
+    const box = svg.getBoundingClientRect();
+    const sx = (e.clientX - box.left) * W / box.width;
+    const i = Math.max(0, Math.min(pts.length - 1, Math.round((sx - L) / (W - L - R) * (pts.length - 1))));
+    hair.setAttribute("x1", x(i)); hair.setAttribute("x2", x(i)); hair.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(v[i])); dot.setAttribute("visibility", "visible");
+    const p = pts[i];
+    show(opts.value(p), `${p.d}, ${p.r}`, x(i) * box.width / W, box.width);
+  });
+  svg.addEventListener("pointerleave", () => {
+    hair.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); show(null);
+  });
+}
+function history(years) {
+  const pts = years ? data.days.slice(-252 * years) : data.days;
+  if (pts.length < 2) return;
+  const sc = n => (n > 0 ? "+" : "") + n;
+  line("price", pts, "c", 300, { title: "Nifty 500, log scale, with regime bands", log: true, value: p => p.c.toLocaleString("en-IN") });
+  line("score", pts, "s", 150, { title: "Regime score", lo: -7, hi: 7, ticks: [data.bear, 0, data.bull], value: p => "Score " + sc(p.s) });
+}
+function rotation() {
+  const root = document.getElementById("rotation");
+  const dots = data.dots;
+  if (!dots.length) return;
+  const W = Math.max(300, root.clientWidth), H = Math.min(460, W * .75), L = 12, R = 12, T = 12, B = 12;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Sector rotation; the sector table has every value" }, root);
+  const mx = Math.max(...dots.map(d => Math.abs(d.x))) * 1.15 || 1;
+  const my = Math.max(...dots.map(d => Math.abs(d.y))) * 1.15 || 1;
+  const x = v => L + (W - L - R) * (v + mx) / (2 * mx);
+  const y = v => T + (H - T - B) * (my - v) / (2 * my);
+  el("line", { x1: x(0), x2: x(0), y1: T, y2: H - B, stroke: "var(--axis)", "stroke-width": 1 }, svg);
+  el("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), stroke: "var(--axis)", "stroke-width": 1 }, svg);
+  label(svg, L + 4, T + 12, "Improving");
+  label(svg, W - R - 4, T + 12, "Leading", "end");
+  label(svg, L + 4, H - B - 6, "Lagging");
+  label(svg, W - R - 4, H - B - 6, "Weakening", "end");
+  const show = tipFor(root);
+  const far = [...dots].sort((a, b) => (Math.abs(b.x / mx) + Math.abs(b.y / my)) - (Math.abs(a.x / mx) + Math.abs(a.y / my))).slice(0, 6);
+  const placed = [];
+  for (const d of dots) {
+    const g = el("g", { tabindex: 0 }, svg);
+    el("circle", { cx: x(d.x), cy: y(d.y), r: 12, fill: "transparent" }, g);
+    el("circle", { cx: x(d.x), cy: y(d.y), r: d.u ? 7 : 5, fill: "var(--series)", stroke: "var(--surface)", "stroke-width": 2 }, g);
+    const on = () => show(d.n, `${d.q}, trend ${d.x}, momentum ${d.y}`, x(d.x) * root.clientWidth / W, root.clientWidth);
+    g.addEventListener("pointerenter", on);
+    g.addEventListener("focus", on);
+    g.addEventListener("pointerleave", () => show(null));
+    g.addEventListener("blur", () => show(null));
+    const lx = x(d.x), ly = y(d.y) - 10;
+    if (far.includes(d) && !placed.some(p => Math.abs(p[0] - lx) < 110 && Math.abs(p[1] - ly) < 16)) {
+      placed.push([lx, ly]);
+      label(svg, lx, ly, d.n, lx > W * .75 ? "end" : lx < W * .25 ? "start" : "middle");
+    }
+  }
+}
+document.querySelectorAll("table.sort").forEach(table => {
+  table.querySelectorAll("th").forEach((th, col) => {
+    let dir = -1;
+    th.addEventListener("click", () => {
+      dir = -dir;
+      const body = table.tBodies[0];
+      const key = tr => {
+        const c = tr.cells[col];
+        return c.dataset.v !== undefined ? Number(c.dataset.v) : c.textContent;
+      };
+      const rows = [...body.rows].sort((a, b) => {
+        const x = key(a), y = key(b);
+        return (x < y ? -1 : x > y ? 1 : 0) * dir;
+      });
+      body.append(...rows);
+    });
+  });
+});
+let years = 3;
+document.querySelectorAll("#range button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#range button").forEach(o => o.setAttribute("aria-pressed", o === b));
+  years = Number(b.dataset.y);
+  history(years);
+}));
+history(years);
+rotation();
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@ NIFTY and BANKNIFTY options; Indian equities and MCX commodities follow.
 | - | `calm auth`: broker login, tokens in Postgres | Done, used with real Upstox and Zerodha |
 | 4 | Upstox ingest and coverage report | Built for NIFTY |
 | 5 | Sweeps, walk-forward, example strategies | Done |
+| - | `calm market`: daily index store, sector report, regime, Slack | Done |
 | 6 | Paper mode: Kite ticker, live fills, journal, tick recording | Not started |
 | 7 | Live mode: order adapters, risk layer, reconciliation | Not started |
 
@@ -48,6 +49,33 @@ Findings from real responses, some of which contradict the docs:
 - Each day file holds every strike of every live expiry, so backtests over real
   data will load far more bars than synthetic ones. Filtering at load time is the
   likely next speed-up.
+
+## Daily market report
+
+Source: NSE's `ind_close_all_DDMMYYYY.csv`, with 167 indices against 139 on Upstox
+and 136 on Zerodha, plus P/E, P/B and volume, and no login. Findings from the files:
+
+- Published about 23:20 IST, so the report runs the next morning. A file can be
+  rewritten later, so each run rechecks the newest five.
+- History starts 2012-02-21. Files are missing for 2014-12-15, 2015-03-12 and
+  2015-07-08, which were trading days.
+- niftyindices.com answers a missing file with 200 and an HTML page, so the NSE
+  archive, which sends a real 404, is tried first.
+- Names changed many times; `configs/indices.yaml` holds the aliases, and
+  `calm market check` proves them. `Nifty Full Midcap 100` is a different series
+  from `NIFTY Midcap 100`.
+- The 2016-07-07 and 2023-04-12 files hold back-calculated rows for indices launched
+  years later, so a gap over 10 days restarts a series.
+- 2014 and 2015 files use slash dates, and three April 2023 files are month first.
+- Nifty High Beta 50 was rebased ×2 on 2014-08-04, which is adjusted out using the
+  published previous close.
+- NSE's P/E basis changed on 2021-03-31 (Nifty 500 fell from 43.3 to 35.9
+  overnight), so percentiles start after it.
+
+Regime rule change: the planned rule had a single line at +4 and -4, which gave 63
+state changes since 2012. The exit rule (+1 and -1) cut that to 39, at the cost of
+leaving Bull later. It was chosen to stop flipping near the line, not to fit a
+particular fall.
 
 ## Step 6: Paper
 
