@@ -28,6 +28,7 @@ import (
 	"calm/internal/market"
 	"calm/internal/nse"
 	"calm/internal/regime"
+	"calm/internal/risk"
 	"calm/internal/sim"
 	"calm/internal/slack"
 	"calm/internal/strategy"
@@ -43,9 +44,9 @@ const usage = `calm researches and trades Indian index options.
   calm auth logout BROKER    revoke a token at the broker and delete it
 
   calm research synth       --from DATE --to DATE [--underlying NIFTY] [--seed N] [--data DIR]
-  calm research backtest    --config FILE
-  calm research sweep       --config FILE
-  calm research walkforward --config FILE
+  calm research backtest    --config FILE [--unseal] [--holdout FILE]
+  calm research sweep       --config FILE [--unseal] [--holdout FILE]
+  calm research walkforward --config FILE [--unseal] [--holdout FILE]
 
   calm research fetch       [--underlying NIFTY] [--from DATE] [--to DATE] [--band-pct 5] [--data DIR]
   calm research coverage    [--underlying NIFTY] [--data DIR]
@@ -79,6 +80,15 @@ type config struct {
 	Margin struct {
 		NakedPct float64 `yaml:"naked_pct"`
 	} `yaml:"margin"`
+	// Risk is optional: without it, runs check margin only.
+	Risk *struct {
+		MaxDailyLoss       float64 `yaml:"max_daily_loss"` // rupees
+		MaxLotsPerLeg      int64   `yaml:"max_lots_per_leg"`
+		MaxOpenLots        int64   `yaml:"max_open_lots"`
+		MaxOrdersPerMinute int     `yaml:"max_orders_per_minute"`
+		MaxQuoteAgeSeconds int     `yaml:"max_quote_age_seconds"`
+		MaxLimitAwayPct    float64 `yaml:"max_limit_away_pct"`
+	} `yaml:"risk"`
 	Sweep struct {
 		Metric string               `yaml:"metric"`
 		Grid   map[string][]float64 `yaml:"grid"`
@@ -113,13 +123,15 @@ func run(ctx context.Context, args []string) error {
 	case "research backtest", "research sweep", "research walkforward":
 		fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 		path := fs.String("config", "", "run config file")
+		holdout := fs.String("holdout", "configs/holdout.yaml", "data held back from research")
+		unseal := fs.Bool("unseal", false, "allow a run into held-back data; it is recorded")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
 		if *path == "" {
 			return errors.New("--config is required")
 		}
-		return runResearch(ctx, args[1], *path)
+		return runResearch(ctx, args[1], *path, *holdout, *unseal)
 	case "research fetch":
 		return runFetch(ctx, rest)
 	case "research coverage":
@@ -905,9 +917,18 @@ func loadConfig(path string) (config, analytics.Spec, error) {
 	if c.Capital <= 0 {
 		return c, analytics.Spec{}, errors.New("capital must be positive")
 	}
-	return c, analytics.Spec{Strategy: c.Strategy, Underlying: c.Underlying, Params: c.Params,
+	spec := analytics.Spec{Strategy: c.Strategy, Underlying: c.Underlying, Params: c.Params,
 		From: from, To: to, Capital: market.Rupees(c.Capital), Sim: simCfg,
-		Margin: margin.Model{NakedPct: c.Margin.NakedPct}, Costs: costs}, nil
+		Margin: margin.Model{NakedPct: c.Margin.NakedPct}, Costs: costs}
+	if r := c.Risk; r != nil {
+		spec.Risk = &risk.Limits{MaxDailyLoss: market.Rupees(r.MaxDailyLoss), MaxLotsPerLeg: r.MaxLotsPerLeg,
+			MaxOpenLots: r.MaxOpenLots, MaxOrdersPerMinute: r.MaxOrdersPerMinute,
+			MaxQuoteAge: time.Duration(r.MaxQuoteAgeSeconds) * time.Second, MaxLimitAwayPct: r.MaxLimitAwayPct}
+		if _, err := risk.New(*spec.Risk); err != nil {
+			return c, analytics.Spec{}, err
+		}
+	}
+	return c, spec, nil
 }
 
 // settlementIndex names the NSE index each underlying settles against.
@@ -944,11 +965,32 @@ func settlementCloses(ctx context.Context, c config, spec analytics.Spec) (map[m
 	return closes, nil
 }
 
-func runResearch(ctx context.Context, action, path string) error {
+func runResearch(ctx context.Context, action, path, holdoutPath string, unseal bool) error {
 	c, spec, err := loadConfig(path)
 	if err != nil {
 		return err
 	}
+	holdouts, err := analytics.LoadHoldouts(holdoutPath)
+	if err != nil {
+		return err
+	}
+	unsealed, err := holdouts.Check(c.DataDir, spec.To, unseal)
+	if err != nil {
+		return err
+	}
+	if unsealed {
+		fmt.Fprintf(os.Stderr, "UNSEALED: this run reads held-back data in %s, and the ledger records it\n", c.DataDir)
+	}
+	configSHA, err := analytics.FileSHA256(path)
+	if err != nil {
+		return err
+	}
+	costsSHA, err := analytics.FileSHA256(c.CostsFile)
+	if err != nil {
+		return err
+	}
+	r := researchRun{c: c, spec: spec, unsealed: unsealed, ledger: analytics.LedgerPath(c.DataDir),
+		configPath: path, configSHA: configSHA, costsSHA: costsSHA}
 	store, err := data.Open(c.DataDir)
 	if err != nil {
 		return err
@@ -963,21 +1005,52 @@ func runResearch(ctx context.Context, action, path string) error {
 	}
 	switch action {
 	case "backtest":
-		return backtest(ctx, store, c, spec)
+		return backtest(ctx, store, r)
 	case "sweep":
 		if len(c.Sweep.Grid) == 0 {
 			return errors.New("sweep.grid is empty")
 		}
-		return sweep(ctx, store, c, spec, metric)
+		return sweep(ctx, store, r, metric)
 	default:
 		if len(c.Sweep.Grid) == 0 {
 			return errors.New("sweep.grid is empty")
 		}
-		return walkForward(ctx, store, c, spec, metric)
+		return walkForward(ctx, store, r, metric)
 	}
 }
 
-func backtest(ctx context.Context, store *data.Store, c config, spec analytics.Spec) error {
+// researchRun is one research command's settings and where it records trials.
+type researchRun struct {
+	c        config
+	spec     analytics.Spec
+	unsealed bool
+	ledger   string
+
+	configPath, configSHA, costsSHA string
+}
+
+// record adds the run's trials to the ledger and returns the strategy's total.
+func (r researchRun) record(recs ...analytics.TrialRecord) (analytics.Provenance, error) {
+	for i := range recs {
+		recs[i].Config = r.configSHA
+	}
+	if err := analytics.AppendTrials(r.ledger, recs); err != nil {
+		return analytics.Provenance{}, fmt.Errorf("trial ledger: %w", err)
+	}
+	n, u, err := analytics.TrialCount(r.ledger, r.spec.Strategy, r.spec.Underlying)
+	if err != nil {
+		return analytics.Provenance{}, fmt.Errorf("trial ledger: %w", err)
+	}
+	fmt.Printf("trials of %s on %s in %s: %d", r.spec.Strategy, r.spec.Underlying, r.c.DataDir, n)
+	if u > 0 {
+		fmt.Printf(", %d run(s) on held-back data", u)
+	}
+	fmt.Println()
+	return analytics.Provenance{Trials: n, UnsealedRuns: u, Unsealed: r.unsealed}, nil
+}
+
+func backtest(ctx context.Context, store *data.Store, r researchRun) error {
+	c, spec := r.c, r.spec
 	o, err := analytics.Run(ctx, store, spec)
 	if err != nil {
 		return err
@@ -992,8 +1065,16 @@ func backtest(ctx context.Context, store *data.Store, c config, spec analytics.S
 	fmt.Printf("sharpe %.2f  max drawdown %.2f%%  trades %d  win rate %.1f%%  profit factor %.2f\n",
 		m.Sharpe, m.MaxDrawdownPct, m.Trades, m.WinRatePct, m.ProfitFactor)
 	fmt.Printf("settled legs %d  unfilled orders %d  rejected orders %d\n", m.SettledLegs, m.Unfilled, m.Rejected)
+	prov, err := r.record(analytics.Record("backtest", spec, m, 1, r.unsealed, analytics.Revision(), time.Now()))
+	if err != nil {
+		return err
+	}
 	reportPath := filepath.Join(c.ReportDir, fmt.Sprintf("%s-%s.html", spec.Strategy, spec.Underlying))
-	if err := analytics.WriteReport(reportPath, o, slip); err != nil {
+	if err := analytics.WriteReport(reportPath, o, slip, prov); err != nil {
+		return err
+	}
+	manifest := analytics.NewManifest(o, prov, r.configPath, r.configSHA, r.costsSHA, c.DataDir, time.Now())
+	if err := analytics.WriteManifest(strings.TrimSuffix(reportPath, ".html")+".json", manifest); err != nil {
 		return err
 	}
 	fmt.Println("report:", reportPath)
@@ -1004,11 +1085,19 @@ func paramString(p strategy.Params) string {
 	return strings.TrimPrefix(fmt.Sprint(map[string]float64(p)), "map")
 }
 
-func sweep(ctx context.Context, store *data.Store, c config, spec analytics.Spec, metric string) error {
+func sweep(ctx context.Context, store *data.Store, r researchRun, metric string) error {
+	c, spec := r.c, r.spec
 	combos := analytics.Grid(c.Params, c.Sweep.Grid)
 	trials, err := analytics.Sweep(ctx, store, spec, combos)
 	if err != nil {
 		return err
+	}
+	rev, now := analytics.Revision(), time.Now()
+	recs := make([]analytics.TrialRecord, 0, len(trials))
+	for _, t := range trials {
+		v := spec
+		v.Params = t.Params
+		recs = append(recs, analytics.Record("sweep", v, t.Metrics, 1, r.unsealed, rev, now))
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "params\tnet\tsharpe\tmax dd\ttrades\twin rate")
@@ -1021,10 +1110,12 @@ func sweep(ctx context.Context, store *data.Store, c config, spec analytics.Spec
 		fmt.Printf("\nbest of %d by %s: %s\n", len(trials), metric, paramString(best.Params))
 		fmt.Println("This is in-sample and the best of many tries, so expect it to be overstated. Run walkforward next.")
 	}
-	return nil
+	_, err = r.record(recs...)
+	return err
 }
 
-func walkForward(ctx context.Context, store *data.Store, c config, spec analytics.Spec, metric string) error {
+func walkForward(ctx context.Context, store *data.Store, r researchRun, metric string) error {
+	c, spec := r.c, r.spec
 	combos := analytics.Grid(c.Params, c.Sweep.Grid)
 	wf, err := analytics.RunWalkForward(ctx, store, spec, combos, metric, c.WalkForward.TrainDays, c.WalkForward.TestDays)
 	if err != nil {
@@ -1041,5 +1132,9 @@ func walkForward(ctx context.Context, store *data.Store, c config, spec analytic
 	fmt.Printf("\nout of sample, %d windows, %d combinations per window:\n", len(wf.Windows), wf.Trials)
 	fmt.Printf("net ₹%s  charges ₹%s  sharpe %.2f  max drawdown %.2f%%  trades %d  win rate %.1f%%\n",
 		m.Net, m.Charges, m.Sharpe, m.MaxDrawdownPct, m.Trades, m.WinRatePct)
-	return nil
+	// Every combination was scored on every training window to choose parameters.
+	v := spec
+	v.Params = nil
+	_, err = r.record(analytics.Record("walkforward", v, m, wf.Trials*len(wf.Windows), r.unsealed, analytics.Revision(), time.Now()))
+	return err
 }

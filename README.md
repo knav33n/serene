@@ -81,6 +81,12 @@ A full download takes hours. If the token expires or the job stops, run
 set `data_dir: data/upstox` and `settlement: data/market` in your config, so
 expiries settle at NSE's official close.
 
+Data from 2026-05-01 is held back (`configs/holdout.yaml`): research runs that
+reach it are refused. Keep it for one final check of a strategy whose design is
+frozen, with `--unseal`, which is recorded. Every run is also logged to
+`data/upstox/trials.jsonl`, and reports show how many parameter sets have been
+tried for that strategy.
+
 ## Daily market report
 
 Stores every Nifty index from NSE's daily file and reports which sectors are
@@ -140,6 +146,13 @@ registry in `strategies.go`. `straddle.go` shows multi-leg selling, and
 - **Margin** is an estimate, not SPAN.
 - **Multi-leg fills** are simultaneous, so legging risk is not modelled.
 - **Order size** is not limited by traded volume.
+- **Orders refused** lists rejections by reason. Add a `risk:` block to a config
+  (see `configs/run.yaml`) to see what pre-trade limits would have stopped.
+  Exits are never refused.
+- **Trial count** on the report is every parameter set tried for the strategy on
+  that data. The more tries, the more of the best result is luck.
+- **`reports/*.json`** records the commit, config and cost hashes behind each
+  report.
 
 ## Costs
 

@@ -27,6 +27,7 @@ h1 { font-size: 26px; margin: 0; }
 h2 { font-size: 17px; margin: 36px 0 10px; }
 .sub, .note { color: var(--text-2); }
 .note { font-size: 13px; margin: 6px 0 0; }
+.warn { font-size: 14px; margin: 12px 0 0; padding: 8px 12px; border: 1px solid var(--text); border-radius: 6px; font-weight: 600; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 20px; }
 .tile { background: var(--surface-2); border-radius: 8px; padding: 12px 14px; }
 .tile b { display: block; font-size: 21px; font-variant-numeric: tabular-nums; }
@@ -50,6 +51,8 @@ summary { cursor: pointer; color: var(--text-2); }
 <main>
   <h1>{{.Title}}</h1>
   <p class="sub">{{.Subtitle}}</p>
+  {{if .Prov.Unsealed}}<p class="warn">This run read held-back data. Its result is only a clean test if the design was frozen before it, and this is the first look.</p>{{end}}
+  {{if .Prov.Trials}}<p class="note">Trial {{.Prov.Trials}} of this strategy on this data{{if .Prov.UnsealedRuns}}, {{.Prov.UnsealedRuns}} of them on held-back data{{end}}. The more tries behind a result, the more of it is luck.</p>{{end}}
 
   <div class="tiles">{{range .Tiles}}<div class="tile"><b>{{.Value}}</b><span>{{.Label}}</span></div>{{end}}</div>
 
@@ -67,6 +70,14 @@ summary { cursor: pointer; color: var(--text-2); }
     {{range .Slip}}<tr><td>{{.Multiple}}</td><td {{if .Loss}}class="loss"{{end}}>{{.Net}}</td><td>{{.Sharpe}}</td><td>{{.MaxDD}}</td></tr>{{end}}
   </table></div>
   <p class="note">Bar data has no bid/ask, so fills are an assumption. Trust a result only if it survives the higher rows.</p>
+  {{end}}
+
+  {{if .Rejects}}
+  <h2>Orders refused</h2>
+  <div class="wrap"><table>
+    <tr><th>Reason</th><th>Orders</th><th>First</th><th>Example</th></tr>
+    {{range .Rejects}}<tr><td>{{.Reason}}</td><td>{{.Count}}</td><td>{{.First}}</td><td>{{.Example}}</td></tr>{{end}}
+  </table></div>
   {{end}}
 
   <h2>Detail</h2>

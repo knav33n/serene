@@ -1,0 +1,6 @@
+# Research data held back from design. A backtest, sweep or walk-forward on a
+# listed data directory refuses any range reaching the date unless run with
+# --unseal, and every unsealed run is recorded in that directory's trial ledger.
+# Unseal once, for a final check of a strategy whose design is frozen. Moving the
+# date later only works if nobody has looked at the data in between.
+data/upstox: "2026-05-01"

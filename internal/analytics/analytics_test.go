@@ -193,14 +193,15 @@ func TestReportWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "r", "report.html")
-	if err := WriteReport(path, o, []SlippageRow{{1, o.Metrics}}); err != nil {
+	if err := WriteReport(path, o, []SlippageRow{{1, o.Metrics}}, Provenance{Trials: 7, Unsealed: true}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"short_straddle on NIFTY", "Sensitivity to slippage", "const points = ["} {
+	for _, want := range []string{"short_straddle on NIFTY", "Sensitivity to slippage", "const points = [",
+		"Trial 7 of this strategy", "This run read held-back data"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("report missing %q", want)
 		}

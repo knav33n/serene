@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 	"calm/internal/cost"
 	"calm/internal/margin"
 	"calm/internal/market"
+	"calm/internal/oms"
 	"calm/internal/portfolio"
+	"calm/internal/risk"
 	"calm/internal/strategy"
 )
 
@@ -29,6 +32,32 @@ type Config struct {
 	// contracts settle at. Nil settles at the last index bar, for data with no
 	// official closes. Otherwise a missing close is an error.
 	IndexCloses map[string]map[market.Date]market.Paise
+	// RunID prefixes every order's client ID, so orders can be traced to the
+	// run that placed them. Letters and digits; "bt" when empty.
+	RunID string
+	// Product is what every order is placed as; Carry when empty.
+	Product market.Product
+	// Risk is the pre-trade gate. Nil means no limits beyond margin.
+	Risk *risk.Gate
+	// Resume rebuilds a run that stopped part-way, from its journal. Nil
+	// starts fresh.
+	Resume *Resume
+}
+
+// Resume rebuilds a run that stopped before At, so a restart cannot lose what
+// the strategy knew. The feed is played from its start: before At, bars reach
+// the strategy as before, the journal's fills are booked at their minutes and
+// passed to OnFill, and each order the strategy submits must match the
+// journal's next order, which is recorded and not sent again. From At the run
+// trades normally.
+//
+// A strategy that decides differently on the same data, or an order still
+// open at At, is an error: the first means the journal cannot be trusted to
+// rebuild it, and the second must be reconciled with the broker first.
+type Resume struct {
+	At     time.Time
+	Orders []market.Order // accepted orders, in placement order
+	Fills  []market.Fill  // traded fills; settlements are recomputed
 }
 
 // EquityPoint is end-of-day equity.
@@ -37,15 +66,37 @@ type EquityPoint struct {
 	Equity market.Paise
 }
 
+// Verdict is what happened to an order a strategy submitted.
+type Verdict string
+
+const (
+	Accepted Verdict = "accepted"
+	Rejected Verdict = "rejected"
+)
+
+// Decision records why an order was accepted or refused. Reason is a stable
+// code to group by; Detail says what was found.
+type Decision struct {
+	Time     time.Time
+	Tag      string
+	OrderID  int64 // zero when rejected
+	ClientID string
+	Verdict  Verdict
+	Reason   string
+	Detail   string
+}
+
 // Result is a run's output.
 type Result struct {
-	Capital  market.Paise
-	Equity   []EquityPoint
-	Trades   []portfolio.Trade
-	Orders   []market.Order
-	Fills    []market.Fill
-	Charges  market.Paise
-	Rejected int
+	Capital market.Paise
+	Equity  []EquityPoint
+	Trades  []portfolio.Trade
+	Orders  []market.Order
+	Fills   []market.Fill
+	Charges market.Paise
+	// Decisions holds every order submitted, accepted or not, in order.
+	Decisions []Decision
+	Rejected  int
 	// MaxDrawdown is measured on every minute, so it sees intraday losses
 	// that daily closes hide.
 	MaxDrawdown market.Paise
@@ -75,6 +126,11 @@ type Engine struct {
 	nextID    int64
 	res       Result
 	peak      market.Paise
+	dayStart  market.Paise // equity at the start of the current day
+
+	replaying   bool
+	nextOrder   int // next journal order to match
+	replayFills map[int64][]market.Fill
 }
 
 // New builds an engine.
@@ -87,6 +143,7 @@ func New(cfg Config, feed Feed, b broker.Broker, s strategy.Strategy) *Engine {
 		indexKey:  map[string]string{},
 		port:      portfolio.New(cfg.Capital),
 		peak:      cfg.Capital,
+		dayStart:  cfg.Capital,
 	}
 	for _, c := range cfg.Contracts {
 		e.contracts[c.Underlying] = append(e.contracts[c.Underlying], c)
@@ -98,6 +155,28 @@ func New(cfg Config, feed Feed, b broker.Broker, s strategy.Strategy) *Engine {
 
 // Run plays the feed to its end.
 func (e *Engine) Run(ctx context.Context) (Result, error) {
+	if e.cfg.RunID == "" {
+		e.cfg.RunID = "bt"
+	}
+	if e.cfg.Product == "" {
+		e.cfg.Product = market.Carry
+	}
+	if _, err := oms.ClientID(e.cfg.RunID, 1); err != nil {
+		return e.res, fmt.Errorf("run ID: %w", err)
+	}
+	if r := e.cfg.Resume; r != nil {
+		e.replaying = true
+		e.replayFills = map[int64][]market.Fill{}
+		for _, f := range r.Fills {
+			if f.Kind != market.Traded {
+				continue
+			}
+			if !f.Time.Before(r.At) {
+				return e.res, fmt.Errorf("resume: fill at %s is not before %s", f.Time.In(market.IST), r.At.In(market.IST))
+			}
+			e.replayFills[f.Time.Unix()] = append(e.replayFills[f.Time.Unix()], f)
+		}
+	}
 	if err := e.strat.Init(e); err != nil {
 		return e.res, fmt.Errorf("strategy init: %w", err)
 	}
@@ -119,9 +198,20 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 				}
 			}
 			e.day = d
+			e.dayStart = e.port.Equity(e.mark)
+		}
+		if e.replaying && !batch.Time.Before(e.cfg.Resume.At) {
+			if err := e.endReplay(); err != nil {
+				return e.res, err
+			}
 		}
 		if err := e.minute(ctx, batch); err != nil {
 			return e.res, fmt.Errorf("at %s: %w", batch.Time.In(market.IST), err)
+		}
+	}
+	if e.replaying {
+		if err := e.endReplay(); err != nil {
+			return e.res, err
 		}
 	}
 	if !e.day.IsZero() {
@@ -143,8 +233,12 @@ func (e *Engine) minute(ctx context.Context, batch Batch) error {
 	for _, b := range batch.Bars {
 		byKey[b.Key] = b
 	}
-	fills, err := e.broker.OnMinute(ctx, batch.Time, byKey)
-	if err != nil {
+	var fills []market.Fill
+	var err error
+	if e.replaying {
+		fills = e.replayFills[batch.Time.Unix()]
+		delete(e.replayFills, batch.Time.Unix())
+	} else if fills, err = e.broker.OnMinute(ctx, batch.Time, byKey); err != nil {
 		return err
 	}
 	if err := e.book(fills); err != nil {
@@ -376,16 +470,20 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 		return fmt.Errorf("order %q has no legs", tag)
 	}
 	held := map[string]*margin.Holding{}
+	gateHeld := map[string]risk.Holding{}
 	for _, p := range e.port.Positions() {
 		held[p.Instrument.Key()] = &margin.Holding{Instrument: p.Instrument, Qty: p.Qty}
+		gateHeld[p.Instrument.Key()] = risk.Holding{Qty: p.Qty, LotSize: p.Instrument.LotSize}
 	}
+	// An exit is never refused for margin or by the gate: refusing it would
+	// trap the risk it was sent to remove.
+	exit := risk.IsExit(gateHeld, legs)
 	var premium market.Paise
 	for _, l := range legs {
 		key := l.Instrument.Key()
 		bar, ok := e.last[key]
 		if !ok {
-			e.res.Rejected++
-			return fmt.Errorf("%w: no price for %s", strategy.ErrRejected, key)
+			return e.reject(tag, "no_price", "no price for "+key)
 		}
 		if held[key] == nil {
 			held[key] = &margin.Holding{Instrument: l.Instrument}
@@ -401,15 +499,109 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 	if err != nil {
 		return err
 	}
-	if e.port.Cash+premium-req < 0 {
-		e.res.Rejected++
-		return fmt.Errorf("%w: margin %s exceeds available cash", strategy.ErrRejected, req)
+	if !exit && e.port.Cash+premium-req < 0 {
+		return e.reject(tag, "margin", fmt.Sprintf("margin %s exceeds available cash", req))
+	}
+	if e.cfg.Risk != nil {
+		v := e.cfg.Risk.Check(risk.State{Now: e.now, DayStartEquity: e.dayStart,
+			Equity: e.port.Equity(e.mark), Held: gateHeld, Last: e.Last}, legs)
+		if !v.Allowed {
+			return e.reject(tag, v.Reason, v.Detail)
+		}
+	}
+	kind, err := orderKind(legs)
+	if err != nil {
+		return err
 	}
 	e.nextID++
-	o := market.Order{ID: e.nextID, Tag: tag, Legs: legs, Placed: e.now}
-	if err := e.broker.Submit(context.Background(), o); err != nil {
+	id, err := oms.ClientID(e.cfg.RunID, e.nextID)
+	if err != nil {
+		return err
+	}
+	o := market.Order{ID: e.nextID, ClientID: id, Tag: tag, Kind: kind, Product: e.cfg.Product,
+		Legs: legs, Placed: e.now}
+	if e.replaying {
+		if err := e.matchJournal(o); err != nil {
+			return err
+		}
+	} else if err := e.broker.Submit(context.Background(), o); err != nil {
 		return err
 	}
 	e.res.Orders = append(e.res.Orders, o)
+	e.res.Decisions = append(e.res.Decisions, Decision{Time: e.now, Tag: tag, OrderID: o.ID, ClientID: id, Verdict: Accepted})
 	return nil
+}
+
+// matchJournal checks a replayed order against the journal's next one.
+func (e *Engine) matchJournal(o market.Order) error {
+	r := e.cfg.Resume
+	if e.nextOrder >= len(r.Orders) {
+		return fmt.Errorf("resume: strategy placed %q at %s, which the journal does not have", o.Tag, o.Placed.In(market.IST))
+	}
+	j := r.Orders[e.nextOrder]
+	if j.ID != o.ID || j.Tag != o.Tag || !j.Placed.Equal(o.Placed) || !reflect.DeepEqual(j.Legs, o.Legs) {
+		return fmt.Errorf("resume: strategy placed %q (order %d) at %s, but the journal has %q (order %d) at %s",
+			o.Tag, o.ID, o.Placed.In(market.IST), j.Tag, j.ID, j.Placed.In(market.IST))
+	}
+	e.nextOrder++
+	return nil
+}
+
+// endReplay checks the journal was used up and nothing was left open, then
+// hands over to the broker.
+func (e *Engine) endReplay() error {
+	e.replaying = false
+	r := e.cfg.Resume
+	if e.nextOrder != len(r.Orders) {
+		j := r.Orders[e.nextOrder]
+		return fmt.Errorf("resume: journal order %d %q at %s was not placed again", j.ID, j.Tag, j.Placed.In(market.IST))
+	}
+	if len(e.replayFills) > 0 {
+		return fmt.Errorf("resume: %d journal fill minute(s) were not in the feed", len(e.replayFills))
+	}
+	filled := map[int64]int64{}
+	for _, f := range r.Fills {
+		if f.Kind == market.Traded {
+			filled[f.OrderID] += f.Qty
+		}
+	}
+	for _, o := range r.Orders {
+		var want int64
+		for _, l := range o.Legs {
+			want += l.Qty()
+		}
+		if filled[o.ID] != want {
+			return fmt.Errorf("resume: order %d %q is open at %s (%d of %d filled): reconcile it with the broker first",
+				o.ID, o.Tag, r.At.In(market.IST), filled[o.ID], want)
+		}
+	}
+	return nil
+}
+
+// orderKind is a limit order when every leg has a limit, and a market order
+// when none does. A mix is refused, since its legs would behave differently.
+func orderKind(legs []market.Leg) (market.OrderKind, error) {
+	limits := 0
+	for _, l := range legs {
+		if l.Limit < 0 {
+			return "", fmt.Errorf("%s: negative limit %s", l.Instrument.Key(), l.Limit)
+		}
+		if l.Limit > 0 {
+			limits++
+		}
+	}
+	switch limits {
+	case 0:
+		return market.MarketOrder, nil
+	case len(legs):
+		return market.LimitOrder, nil
+	}
+	return "", errors.New("an order's legs must all have limits or none")
+}
+
+// reject records a refused order and returns the error strategies see.
+func (e *Engine) reject(tag, reason, detail string) error {
+	e.res.Rejected++
+	e.res.Decisions = append(e.res.Decisions, Decision{Time: e.now, Tag: tag, Verdict: Rejected, Reason: reason, Detail: detail})
+	return fmt.Errorf("%w: %s", strategy.ErrRejected, detail)
 }

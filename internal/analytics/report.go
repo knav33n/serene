@@ -7,9 +7,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"calm/internal/engine"
 	"calm/internal/market"
 	"calm/internal/strategy"
 )
@@ -33,15 +35,51 @@ type tradeRow struct {
 
 type tile struct{ Label, Value string }
 
+type rejectRow struct {
+	Reason, First, Example string
+	Count                  int
+}
+
+// rejections groups refused orders by reason, most frequent first.
+func rejections(ds []engine.Decision) []rejectRow {
+	idx := map[string]int{}
+	var rows []rejectRow
+	for _, d := range ds {
+		if d.Verdict != engine.Rejected {
+			continue
+		}
+		i, ok := idx[d.Reason]
+		if !ok {
+			i = len(rows)
+			idx[d.Reason] = i
+			rows = append(rows, rejectRow{Reason: d.Reason, First: stamp(d.Time), Example: d.Detail})
+		}
+		rows[i].Count++
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Count > rows[j].Count })
+	return rows
+}
+
 type slipRow struct {
 	Multiple, Net, Sharpe, MaxDD string
 	Loss                         bool
 }
 
+// Provenance is what a report says about how its result was reached.
+type Provenance struct {
+	// Trials counts every parameter set tried for this strategy on this data,
+	// this run included.
+	Trials       int
+	UnsealedRuns int  // runs of this strategy that read held-back data
+	Unsealed     bool // this run read held-back data
+}
+
 // WriteReport renders a backtest as a standalone HTML file.
-func WriteReport(path string, o Outcome, slip []SlippageRow) error {
+func WriteReport(path string, o Outcome, slip []SlippageRow, prov Provenance) error {
 	m := o.Metrics
 	view := struct {
+		Prov     Provenance
+		Rejects  []rejectRow
 		Title    string
 		Subtitle string
 		Tiles    []tile
@@ -51,7 +89,9 @@ func WriteReport(path string, o Outcome, slip []SlippageRow) error {
 		Trades   []tradeRow
 		Hidden   int
 	}{
-		Title: fmt.Sprintf("%s on %s", o.Spec.Strategy, o.Spec.Underlying),
+		Prov:    prov,
+		Rejects: rejections(o.Result.Decisions),
+		Title:   fmt.Sprintf("%s on %s", o.Spec.Strategy, o.Spec.Underlying),
 		Subtitle: fmt.Sprintf("%s to %s, %d trading days, capital %s, params %s",
 			o.Spec.From, o.Spec.To, m.Days, rupees(o.Spec.Capital), paramText(o.Spec.Params)),
 		Tiles: []tile{

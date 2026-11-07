@@ -171,3 +171,18 @@ func TestResamplerRejectsBadInput(t *testing.T) {
 		t.Error("zero timeframe accepted")
 	}
 }
+
+func TestDateTextRoundTrip(t *testing.T) {
+	d := Date{2026, time.May, 1}
+	b, err := d.MarshalText()
+	if err != nil || string(b) != "2026-05-01" {
+		t.Fatalf("marshal = %q, %v", b, err)
+	}
+	var got Date
+	if err := got.UnmarshalText(b); err != nil || got != d {
+		t.Fatalf("unmarshal = %v, %v", got, err)
+	}
+	if err := got.UnmarshalText([]byte("2026-13-01")); err == nil {
+		t.Fatal("bad date accepted")
+	}
+}

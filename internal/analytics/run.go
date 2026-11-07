@@ -11,6 +11,7 @@ import (
 	"calm/internal/engine"
 	"calm/internal/margin"
 	"calm/internal/market"
+	"calm/internal/risk"
 	"calm/internal/sim"
 	"calm/internal/strategies"
 	"calm/internal/strategy"
@@ -29,6 +30,9 @@ type Spec struct {
 	// Closes holds official index closes by date. Nil settles expiries at the
 	// last index bar, for data with no official closes.
 	Closes map[market.Date]market.Paise
+	// Risk sets pre-trade limits; nil runs with margin checks only. Each run
+	// gets its own gate, so parallel sweeps do not share halts or order counts.
+	Risk *risk.Limits
 }
 
 // Outcome is a finished backtest.
@@ -64,6 +68,11 @@ func Run(ctx context.Context, store *data.Store, s Spec) (Outcome, error) {
 	if s.Closes != nil {
 		idx := market.Index(market.NSE, s.Underlying).Key()
 		cfg.IndexCloses = map[string]map[market.Date]market.Paise{idx: s.Closes}
+	}
+	if s.Risk != nil {
+		if cfg.Risk, err = risk.New(*s.Risk); err != nil {
+			return Outcome{}, err
+		}
 	}
 	r, err := engine.New(cfg, feed, b, strat).Run(ctx)
 	if err != nil {
