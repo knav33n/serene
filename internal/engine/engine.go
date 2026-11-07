@@ -14,6 +14,7 @@ import (
 	"calm/internal/cost"
 	"calm/internal/margin"
 	"calm/internal/market"
+	"calm/internal/oms"
 	"calm/internal/portfolio"
 	"calm/internal/strategy"
 )
@@ -25,6 +26,11 @@ type Config struct {
 	Costs     *cost.Schedule
 	Margin    margin.Model
 	Capital   market.Paise
+	// RunID prefixes every order's client ID, so orders can be traced to the
+	// run that placed them. Letters and digits; "bt" when empty.
+	RunID string
+	// Product is what every order is placed as; Carry when empty.
+	Product market.Product
 }
 
 // EquityPoint is end-of-day equity.
@@ -44,12 +50,13 @@ const (
 // Decision records why an order was accepted or refused. Reason is a stable
 // code to group by; Detail says what was found.
 type Decision struct {
-	Time    time.Time
-	Tag     string
-	OrderID int64 // zero when rejected
-	Verdict Verdict
-	Reason  string
-	Detail  string
+	Time     time.Time
+	Tag      string
+	OrderID  int64 // zero when rejected
+	ClientID string
+	Verdict  Verdict
+	Reason   string
+	Detail   string
 }
 
 // Result is a run's output.
@@ -115,6 +122,15 @@ func New(cfg Config, feed Feed, b broker.Broker, s strategy.Strategy) *Engine {
 
 // Run plays the feed to its end.
 func (e *Engine) Run(ctx context.Context) (Result, error) {
+	if e.cfg.RunID == "" {
+		e.cfg.RunID = "bt"
+	}
+	if e.cfg.Product == "" {
+		e.cfg.Product = market.Carry
+	}
+	if _, err := oms.ClientID(e.cfg.RunID, 1); err != nil {
+		return e.res, fmt.Errorf("run ID: %w", err)
+	}
 	if err := e.strat.Init(e); err != nil {
 		return e.res, fmt.Errorf("strategy init: %w", err)
 	}
@@ -408,14 +424,44 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 	if e.port.Cash+premium-req < 0 {
 		return e.reject(tag, "margin", fmt.Sprintf("margin %s exceeds available cash", req))
 	}
+	kind, err := orderKind(legs)
+	if err != nil {
+		return err
+	}
 	e.nextID++
-	o := market.Order{ID: e.nextID, Tag: tag, Legs: legs, Placed: e.now}
+	id, err := oms.ClientID(e.cfg.RunID, e.nextID)
+	if err != nil {
+		return err
+	}
+	o := market.Order{ID: e.nextID, ClientID: id, Tag: tag, Kind: kind, Product: e.cfg.Product,
+		Legs: legs, Placed: e.now}
 	if err := e.broker.Submit(context.Background(), o); err != nil {
 		return err
 	}
 	e.res.Orders = append(e.res.Orders, o)
-	e.res.Decisions = append(e.res.Decisions, Decision{Time: e.now, Tag: tag, OrderID: o.ID, Verdict: Accepted})
+	e.res.Decisions = append(e.res.Decisions, Decision{Time: e.now, Tag: tag, OrderID: o.ID, ClientID: id, Verdict: Accepted})
 	return nil
+}
+
+// orderKind is a limit order when every leg has a limit, and a market order
+// when none does. A mix is refused, since its legs would behave differently.
+func orderKind(legs []market.Leg) (market.OrderKind, error) {
+	limits := 0
+	for _, l := range legs {
+		if l.Limit < 0 {
+			return "", fmt.Errorf("%s: negative limit %s", l.Instrument.Key(), l.Limit)
+		}
+		if l.Limit > 0 {
+			limits++
+		}
+	}
+	switch limits {
+	case 0:
+		return market.MarketOrder, nil
+	case len(legs):
+		return market.LimitOrder, nil
+	}
+	return "", errors.New("an order's legs must all have limits or none")
 }
 
 // reject records a refused order and returns the error strategies see.

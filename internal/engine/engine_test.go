@@ -314,6 +314,33 @@ func TestAcceptedOrdersAreLogged(t *testing.T) {
 	}
 }
 
+func TestOrdersCarryClientIDKindAndProduct(t *testing.T) {
+	var mixed error
+	s := once(func(ctx strategy.Context) error {
+		mixed = ctx.Submit("m", market.Leg{Instrument: ce, Side: market.Buy, Lots: 1, Limit: 9000},
+			market.Leg{Instrument: pe, Side: market.Buy, Lots: 1})
+		return ctx.Submit("x", market.Leg{Instrument: ce, Side: market.Buy, Lots: 1})
+	}, day.At(10, 0))
+	r, b := runWith(t, session(day, market.Rupees(24000), ce, pe), cost.Zero(), market.Rupees(1e6), s)
+	if mixed == nil {
+		t.Fatal("legs mixing limit and market were accepted")
+	}
+	if len(r.Orders) != 1 {
+		t.Fatalf("orders = %+v", r.Orders)
+	}
+	o := r.Orders[0]
+	if o.ClientID != "bt000001" || o.Kind != market.MarketOrder || o.Product != market.Carry {
+		t.Fatalf("order = %+v", o)
+	}
+	if r.Decisions[0].ClientID != o.ClientID {
+		t.Fatalf("decision = %+v", r.Decisions[0])
+	}
+	got, _ := b.Orders(context.Background())
+	if len(got) != 1 || got[0].LegStates[0].State != "filled" {
+		t.Fatalf("broker orders = %+v", got)
+	}
+}
+
 // A strategy that reads the option's price each minute and flips on it, so any
 // leak of future data would change its orders.
 func reactive() *script {
