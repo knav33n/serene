@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"time"
 
@@ -34,6 +35,25 @@ type Config struct {
 	Product market.Product
 	// Risk is the pre-trade gate. Nil means no limits beyond margin.
 	Risk *risk.Gate
+	// Resume rebuilds a run that stopped part-way, from its journal. Nil
+	// starts fresh.
+	Resume *Resume
+}
+
+// Resume rebuilds a run that stopped before At, so a restart cannot lose what
+// the strategy knew. The feed is played from its start: before At, bars reach
+// the strategy as before, the journal's fills are booked at their minutes and
+// passed to OnFill, and each order the strategy submits must match the
+// journal's next order, which is recorded and not sent again. From At the run
+// trades normally.
+//
+// A strategy that decides differently on the same data, or an order still
+// open at At, is an error: the first means the journal cannot be trusted to
+// rebuild it, and the second must be reconciled with the broker first.
+type Resume struct {
+	At     time.Time
+	Orders []market.Order // accepted orders, in placement order
+	Fills  []market.Fill  // traded fills; settlements are recomputed
 }
 
 // EquityPoint is end-of-day equity.
@@ -103,6 +123,10 @@ type Engine struct {
 	res       Result
 	peak      market.Paise
 	dayStart  market.Paise // equity at the start of the current day
+
+	replaying   bool
+	nextOrder   int // next journal order to match
+	replayFills map[int64][]market.Fill
 }
 
 // New builds an engine.
@@ -136,6 +160,19 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	if _, err := oms.ClientID(e.cfg.RunID, 1); err != nil {
 		return e.res, fmt.Errorf("run ID: %w", err)
 	}
+	if r := e.cfg.Resume; r != nil {
+		e.replaying = true
+		e.replayFills = map[int64][]market.Fill{}
+		for _, f := range r.Fills {
+			if f.Kind != market.Traded {
+				continue
+			}
+			if !f.Time.Before(r.At) {
+				return e.res, fmt.Errorf("resume: fill at %s is not before %s", f.Time.In(market.IST), r.At.In(market.IST))
+			}
+			e.replayFills[f.Time.Unix()] = append(e.replayFills[f.Time.Unix()], f)
+		}
+	}
 	if err := e.strat.Init(e); err != nil {
 		return e.res, fmt.Errorf("strategy init: %w", err)
 	}
@@ -159,8 +196,18 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 			e.day = d
 			e.dayStart = e.port.Equity(e.mark)
 		}
+		if e.replaying && !batch.Time.Before(e.cfg.Resume.At) {
+			if err := e.endReplay(); err != nil {
+				return e.res, err
+			}
+		}
 		if err := e.minute(ctx, batch); err != nil {
 			return e.res, fmt.Errorf("at %s: %w", batch.Time.In(market.IST), err)
+		}
+	}
+	if e.replaying {
+		if err := e.endReplay(); err != nil {
+			return e.res, err
 		}
 	}
 	if !e.day.IsZero() {
@@ -182,8 +229,12 @@ func (e *Engine) minute(ctx context.Context, batch Batch) error {
 	for _, b := range batch.Bars {
 		byKey[b.Key] = b
 	}
-	fills, err := e.broker.OnMinute(ctx, batch.Time, byKey)
-	if err != nil {
+	var fills []market.Fill
+	var err error
+	if e.replaying {
+		fills = e.replayFills[batch.Time.Unix()]
+		delete(e.replayFills, batch.Time.Unix())
+	} else if fills, err = e.broker.OnMinute(ctx, batch.Time, byKey); err != nil {
 		return err
 	}
 	if err := e.book(fills); err != nil {
@@ -453,11 +504,61 @@ func (e *Engine) Submit(tag string, legs ...market.Leg) error {
 	}
 	o := market.Order{ID: e.nextID, ClientID: id, Tag: tag, Kind: kind, Product: e.cfg.Product,
 		Legs: legs, Placed: e.now}
-	if err := e.broker.Submit(context.Background(), o); err != nil {
+	if e.replaying {
+		if err := e.matchJournal(o); err != nil {
+			return err
+		}
+	} else if err := e.broker.Submit(context.Background(), o); err != nil {
 		return err
 	}
 	e.res.Orders = append(e.res.Orders, o)
 	e.res.Decisions = append(e.res.Decisions, Decision{Time: e.now, Tag: tag, OrderID: o.ID, ClientID: id, Verdict: Accepted})
+	return nil
+}
+
+// matchJournal checks a replayed order against the journal's next one.
+func (e *Engine) matchJournal(o market.Order) error {
+	r := e.cfg.Resume
+	if e.nextOrder >= len(r.Orders) {
+		return fmt.Errorf("resume: strategy placed %q at %s, which the journal does not have", o.Tag, o.Placed.In(market.IST))
+	}
+	j := r.Orders[e.nextOrder]
+	if j.ID != o.ID || j.Tag != o.Tag || !j.Placed.Equal(o.Placed) || !reflect.DeepEqual(j.Legs, o.Legs) {
+		return fmt.Errorf("resume: strategy placed %q (order %d) at %s, but the journal has %q (order %d) at %s",
+			o.Tag, o.ID, o.Placed.In(market.IST), j.Tag, j.ID, j.Placed.In(market.IST))
+	}
+	e.nextOrder++
+	return nil
+}
+
+// endReplay checks the journal was used up and nothing was left open, then
+// hands over to the broker.
+func (e *Engine) endReplay() error {
+	e.replaying = false
+	r := e.cfg.Resume
+	if e.nextOrder != len(r.Orders) {
+		j := r.Orders[e.nextOrder]
+		return fmt.Errorf("resume: journal order %d %q at %s was not placed again", j.ID, j.Tag, j.Placed.In(market.IST))
+	}
+	if len(e.replayFills) > 0 {
+		return fmt.Errorf("resume: %d journal fill minute(s) were not in the feed", len(e.replayFills))
+	}
+	filled := map[int64]int64{}
+	for _, f := range r.Fills {
+		if f.Kind == market.Traded {
+			filled[f.OrderID] += f.Qty
+		}
+	}
+	for _, o := range r.Orders {
+		var want int64
+		for _, l := range o.Legs {
+			want += l.Qty()
+		}
+		if filled[o.ID] != want {
+			return fmt.Errorf("resume: order %d %q is open at %s (%d of %d filled): reconcile it with the broker first",
+				o.ID, o.Tag, r.At.In(market.IST), filled[o.ID], want)
+		}
+	}
 	return nil
 }
 
