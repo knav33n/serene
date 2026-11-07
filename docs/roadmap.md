@@ -13,6 +13,7 @@ NIFTY and BANKNIFTY options; Indian equities and MCX commodities follow.
 | 4 | Upstox ingest and coverage report | Built for NIFTY |
 | 5 | Sweeps, walk-forward, example strategies | Done |
 | - | `calm market`: daily index store, sector report, regime, Slack | Done |
+| - | Seams for paper and live: holdout, decision log, order lifecycle, risk gate, resume | Done |
 | 6 | Paper mode: Kite ticker, live fills, journal, tick recording | Not started |
 | 7 | Live mode: order adapters, risk layer, reconciliation | Not started |
 
@@ -77,12 +78,52 @@ state changes since 2012. The exit rule (+1 and -1) cut that to 39, at the cost 
 leaving Bull later. It was chosen to stop flipping near the line, not to fit a
 particular fall.
 
+## Seams for paper and live
+
+Built from a review of seven open-source trading systems (sklinkert/at,
+simple-trader, goquant, india-trade-cli, algorithmic-trading-engine,
+kite-algo-bot, auto-trader-bot) on 2026-11-07. Live orders will go to both
+Zerodha and Upstox, so none of this is specific to one broker.
+
+- Research holdout and trial ledger: `configs/holdout.yaml`, `--unseal`,
+  `<data_dir>/trials.jsonl`.
+- Every order decision is recorded with a reason; reports group refusals.
+- Report manifests: commit, config and cost hashes.
+- `internal/oms`: per-leg states, including `Unknown` for an order sent with no
+  known outcome. Client IDs are letters and digits, at most 20 characters.
+- `broker.Broker` has `Cancel`; `broker.Account` (positions, orders) and
+  `broker.Funds` are separate. `internal/broker/brokertest` is the contract
+  every adapter must pass; the simulator passes it with both fill models.
+- `sim.FillModel`: `BarOpen` for backtests, `QuoteFill` (ask for buys, bid for
+  sells, stale quotes refused) for paper.
+- `internal/risk`: daily loss over the IST day net of charges, lot and rate
+  limits, stale quotes, a limit-price collar, and a manual halt. Exits are never
+  refused, by the gate or by margin.
+- `engine.Config.Resume`: a restart replays the journal through the strategy and
+  refuses to continue if the strategy disagrees or an order was left open.
+
+Not built: a strategy warm-up interface, since neither strategy needs history
+from before the day.
+
 ## Step 6: Paper
 
 Kite ticker feed, simulated fills on live bid/ask, an append-only JSONL order
 journal, and recording live ticks to Parquet to calibrate slippage. Includes a
 parity test: the same strategy on recorded data must produce identical orders
 through the backtest and paper paths.
+
+Decided:
+
+- The journal is JSONL, fsynced before each order is sent, with a `flock` so two
+  runs can't trade at once. Trading must not depend on Postgres or Redis.
+- Startup reads the journal back into positions, today's loss and any halt, then
+  resumes through `engine.Config.Resume`. A mismatch with the broker's
+  `Account` refuses to start.
+- Recorded ticks live apart from `data/upstox` and `data/market` and are never
+  merged into them; replays are marked as such.
+- `calm check` before the open and after the close: token valid through the
+  close, trading day, data fresh, journal lock free, `.env` mode 600, disk, and
+  that the run started. It reports to Slack and never acts.
 
 ## Step 7: Live
 
@@ -93,6 +134,19 @@ Kite order adapter, then Upstox. Live needs both an explicit flag and config.
 - Refuse to start unless `Token.ValidThrough` covers 15:30 IST.
 - Run a strategy on paper first, then start at minimum size.
 - Test against a fake broker: rejections, disconnects, position mismatches.
+  The fake and both adapters run `internal/broker/brokertest`.
+- Never retry order placement automatically. A timeout leaves the order
+  `Unknown`; look it up by client ID and halt entries until it is resolved.
+  Reads may retry.
+- If either live switch is missing, refuse to start. Never fall back to paper
+  quietly.
+- Two-level kill: halt stops entries, flatten closes positions. A position is
+  closed only on a confirmed fill; if the broker API is down, halt and alert.
+- A structure that fills some legs and not others (`oms.Order.Broken`) is
+  flattened and alerted. So is a position whose protective stop can't be placed.
+- Each adapter maps `market.Product` and broker statuses to calm's own; an
+  unrecognised status becomes `Unknown`, never `Filled`. Check each broker's tag
+  limit, stop types for options, and any idempotency support before building.
 
 Constraints:
 
