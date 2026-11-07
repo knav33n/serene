@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -116,5 +117,36 @@ func TestContractsKeepLotSizePerContract(t *testing.T) {
 	bad := market.Option(market.NFO, "NIFTY", newExp, market.Rupees(25000), market.Put, 0)
 	if err := s.PutContracts(ctx, "NIFTY", []market.Instrument{bad}); err == nil {
 		t.Error("contract without lot size accepted")
+	}
+}
+
+func TestEquityGaps(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	d := func(day int) market.Date { return market.Date{Year: 2026, Month: 11, Day: day} }
+	row := func(sym, isin string, day int, open, close float64) market.EquityDay {
+		return market.EquityDay{Date: d(day), Symbol: sym, Series: "EQ", ISIN: isin, Open: market.Rupees(open),
+			High: market.Rupees(open), Low: market.Rupees(close), Close: market.Rupees(close), Volume: 1}
+	}
+	rows := []market.EquityDay{
+		row("BONUS", "INE1", 2, 100, 100), row("BONUS", "INE1", 3, 50, 51), // a 1:1 bonus
+		row("CRASH", "INE2", 2, 100, 100), row("CRASH", "INE2", 3, 90, 96), // fell at the open, recovered
+		row("SPLIT", "INE3", 2, 100, 100), row("SPLIT", "INE4", 3, 99, 99), // new ISIN, gap hidden
+		row("OLD", "INE5", 2, 100, 100), row("OLD", "INE5", 3, 50, 50), // before the scan
+	}
+	rows[6].Date, rows[7].Date = d(1), d(2)
+	if err := s.ReplaceEquityYear(ctx, 2026, rows); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.EquityGaps(ctx, d(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"BONUS", "SPLIT"}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }

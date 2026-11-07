@@ -21,6 +21,7 @@ import (
 
 	"calm/internal/analytics"
 	"calm/internal/auth"
+	"calm/internal/bhav"
 	"calm/internal/cost"
 	"calm/internal/data"
 	"calm/internal/ingest"
@@ -55,6 +56,11 @@ const usage = `calm researches and trades Indian index options.
   calm market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
   calm market daily         [--slack] [--data DIR] [--catalog FILE] [--reports DIR]
   calm market check         [--data DIR] [--catalog FILE]
+
+  calm equities fetch       [--from DATE] [--to DATE] [--rebuild] [--data DIR]
+  calm equities check       [--symbols A,B] [--from DATE] [--to DATE] [--data DIR]
+  calm equities adjust      [--symbols A,B] [--recheck] [--data DIR]
+  calm equities daily       [--data DIR]
 
 Not built yet:
   calm prod paper, calm prod live
@@ -144,6 +150,14 @@ func run(ctx context.Context, args []string) error {
 		return runMarketDaily(ctx, rest)
 	case "market check":
 		return runMarketCheck(ctx, rest)
+	case "equities fetch":
+		return runEquitiesFetch(ctx, rest)
+	case "equities check":
+		return runEquitiesCheck(ctx, rest)
+	case "equities adjust":
+		return runEquitiesAdjust(ctx, rest)
+	case "equities daily":
+		return runEquitiesDaily(ctx, rest)
 	case "prod paper", "prod live":
 		return fmt.Errorf("%q is not built yet", cmd)
 	}
@@ -301,6 +315,183 @@ func runMarketFetch(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("stored %d years. Names not in the catalog: %s\n", len(years), listOrNone(unknown))
+	return nil
+}
+
+// runEquitiesFetch downloads NSE's daily cash market bhavcopy and rebuilds
+// the years it touched. The default range is NSE's whole history.
+func runEquitiesFetch(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("equities fetch", flag.ContinueOnError)
+	from := fs.String("from", bhav.FirstDay.String(), "first date")
+	to := fs.String("to", "", "last date, default today")
+	rebuild := fs.Bool("rebuild", false, "skip the download and rebuild the store from the raw files")
+	dir := fs.String("data", "data/equities", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	store, err := data.Open(*dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	var years []int
+	if *rebuild {
+		dates, err := bhav.RawDates(*dir)
+		if err != nil {
+			return err
+		}
+		years = bhav.Years(dates)
+	} else {
+		f, err := market.ParseDate(*from)
+		if err != nil {
+			return err
+		}
+		t := market.DateOf(time.Now())
+		if *to != "" {
+			if t, err = market.ParseDate(*to); err != nil {
+				return err
+			}
+		}
+		if years, err = equitiesDownload(ctx, *dir, f, t); err != nil {
+			return err
+		}
+	}
+	if err := bhav.Rebuild(ctx, *dir, store, years); err != nil {
+		return err
+	}
+	fmt.Printf("stored %d years in %s\n", len(years), filepath.Join(*dir, "stocks"))
+	return nil
+}
+
+// runEquitiesCheck compares stored bhavcopy rows with Upstox daily candles for
+// some EQ-series symbols. Bhavcopy prices are as traded, so a split or bonus
+// shows as a run of mismatches before it if Upstox adjusts for it.
+func runEquitiesCheck(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("equities check", flag.ContinueOnError)
+	symbols := fs.String("symbols", "RELIANCE,HDFCBANK,INFY,TCS,SBIN,ITC,TATASTEEL,IRCTC,SUZLON,YESBANK,ZEEL,20MICRONS",
+		"comma-separated EQ-series symbols")
+	from := fs.String("from", market.DateOf(time.Now()).AddDays(-365).String(), "first date")
+	to := fs.String("to", market.DateOf(time.Now()).String(), "last date")
+	dir := fs.String("data", "data/equities", "data directory")
+	show := fs.Int("show", 5, "mismatches to print per symbol")
+	adjusted := fs.Bool("adjusted", false, "apply the stored adjustment factors first, and allow 0.5% for rounding")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	f, err := market.ParseDate(*from)
+	if err != nil {
+		return err
+	}
+	t, err := market.ParseDate(*to)
+	if err != nil {
+		return err
+	}
+	tokens, err := openTokens(ctx)
+	if err != nil {
+		return err
+	}
+	defer tokens.Close()
+	token, err := auth.Load(ctx, tokens, "upstox")
+	if err != nil {
+		return err
+	}
+	up := upstox.New(token.AccessToken)
+	store, err := data.Open(*dir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "symbol\tdays\tmatch\tohlc off\tvolume off\tonly bhav\tonly upstox")
+	var notes []string
+	for _, sym := range strings.Split(*symbols, ",") {
+		rows, err := store.EquityDays(ctx, sym, "EQ", f, t)
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			fmt.Fprintf(tw, "%s\tno bhavcopy rows\n", sym)
+			continue
+		}
+		// Files before 2011 carry no ISIN, so take the newest one.
+		all, err := store.EquityDays(ctx, sym, "EQ", bhav.FirstDay, market.DateOf(time.Now()))
+		if err != nil {
+			return err
+		}
+		isin := all[len(all)-1].ISIN
+		var candles []upstox.Candle
+		// A decade per request is Upstox's limit for daily candles.
+		for lo := f; !t.Before(lo); lo = lo.AddDays(3650) {
+			hi := lo.AddDays(3649)
+			if t.Before(hi) {
+				hi = t
+			}
+			c, err := up.DailyCandles(ctx, "NSE_EQ|"+isin, lo, hi)
+			if err != nil {
+				return fmt.Errorf("%s: %w", sym, err)
+			}
+			candles = append(candles, c...)
+		}
+		factors, err := store.EquityFactors(ctx, sym)
+		if err != nil {
+			return err
+		}
+		factorOn := func(d market.Date) float64 {
+			for _, f := range factors {
+				if !d.Before(f.From) && !f.To.Before(d) {
+					return f.FactorAll
+				}
+			}
+			return 1
+		}
+		byDate := map[market.Date]upstox.Candle{}
+		for _, c := range candles {
+			byDate[market.DateOf(c.Time)] = c
+		}
+		var match, ohlcOff, volOff, onlyBhav, shown int
+		for _, r := range rows {
+			c, ok := byDate[r.Date]
+			if !ok {
+				onlyBhav++
+				continue
+			}
+			delete(byDate, r.Date)
+			o, h, l, cl := market.Rupees(c.Open), market.Rupees(c.High), market.Rupees(c.Low), market.Rupees(c.Close)
+			priceOK := o == r.Open && h == r.High && l == r.Low && cl == r.Close
+			volOK := c.Volume == r.Volume
+			if *adjusted {
+				f := factorOn(r.Date)
+				near := func(u, b market.Paise) bool {
+					return math.Abs(float64(u)-float64(b)*f) <= 0.005*float64(b)*f+1
+				}
+				r.Open, r.High, r.Low, r.Close = market.Rupees(r.Open.Rupees()*f), market.Rupees(r.High.Rupees()*f),
+					market.Rupees(r.Low.Rupees()*f), market.Rupees(r.Close.Rupees()*f)
+				f = 1
+				priceOK = near(o, r.Open) && near(h, r.High) && near(l, r.Low) && near(cl, r.Close)
+				volOK = true
+			}
+			switch {
+			case priceOK && volOK:
+				match++
+				continue
+			case !priceOK:
+				ohlcOff++
+			default:
+				volOff++
+			}
+			if shown < *show {
+				shown++
+				notes = append(notes, fmt.Sprintf("%s %s  bhav %s/%s/%s/%s v%d  upstox %s/%s/%s/%s v%d", sym, r.Date,
+					r.Open, r.High, r.Low, r.Close, r.Volume, o, h, l, cl, c.Volume))
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", sym, len(rows), match, ohlcOff, volOff, onlyBhav, len(byDate))
+	}
+	tw.Flush()
+	for _, n := range notes {
+		fmt.Println(n)
+	}
 	return nil
 }
 

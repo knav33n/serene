@@ -194,7 +194,7 @@ func (c *Client) OptionContracts(ctx context.Context, indexKey string, expiry ma
 	return out, err
 }
 
-// Candle is one 1-minute candle in rupees.
+// Candle is one candle in rupees: a minute or a day, by request.
 type Candle struct {
 	Time                   time.Time
 	Open, High, Low, Close float64
@@ -268,6 +268,17 @@ func (c *Client) ExpiredCandles(ctx context.Context, expiredKey string, from, to
 func (c *Client) IndexCandles(ctx context.Context, key string, from, to market.Date) ([]Candle, error) {
 	var d candleData
 	path := fmt.Sprintf("/v3/historical-candle/%s/minutes/1/%s/%s", url.PathEscape(key), to, from)
+	if err := c.get(ctx, path, &d); err != nil {
+		return nil, err
+	}
+	return parseCandles(d)
+}
+
+// DailyCandles returns daily candles, newest first. Upstox allows up to a
+// decade of days in one request.
+func (c *Client) DailyCandles(ctx context.Context, key string, from, to market.Date) ([]Candle, error) {
+	var d candleData
+	path := fmt.Sprintf("/v3/historical-candle/%s/days/1/%s/%s", url.PathEscape(key), to, from)
 	if err := c.get(ctx, path, &d); err != nil {
 		return nil, err
 	}

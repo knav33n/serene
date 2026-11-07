@@ -123,6 +123,56 @@ the low in February 2025. Bear days were followed by gains more often than not, 
 it's no signal to sell. Thresholds were set before looking at results, apart from
 the exit rule, and five falls can't validate them.
 
+## Stock prices
+
+Stores NSE's daily bhavcopy: open, high, low, close, volume and turnover for every
+security traded, from the first session on 1994-11-03. It needs no broker login.
+
+```sh
+./calm equities fetch             # backfills from 1994, safe to rerun
+./calm equities adjust            # finds splits and bonuses, needs an Upstox login
+./calm equities check --adjusted  # compares with Upstox daily candles
+./calm equities daily             # fetch, then confirm any new splits or bonuses
+```
+
+Raw zips are kept in `data/equities/raw/` and rebuilt into
+`data/equities/stocks/year=YYYY.parquet`, with prices in paise as traded. Stocks
+are in series EQ, BE, BZ, SM and ST; the file also holds bonds, gold bonds and units.
+
+Prices aren't adjusted for corporate actions, and NSE's previous close isn't
+either, so `adjust` compares each listed stock with Upstox's adjusted daily
+candles: their ratio steps on each ex-date. A step that is a split or bonus
+ratio, such as 1/2 for a 1:1 bonus or 1/5 for a split from ₹10 to ₹2, is
+snapped to it exactly. Any other step of 3% or more is kept as `other`: a
+demerger, a rights issue, or a dividend large enough for Upstox to adjust, as
+with Coal India's in November 2023. Results go to `data/equities/adjust/events.parquet` and `factors.parquet`:
+
+```sql
+-- factor_all also counts the other events; a stock with none has no rows
+SELECT s.date, s.close / 100 * coalesce(f.factor, 1) AS close
+FROM 'data/equities/stocks/*.parquet' s
+LEFT JOIN 'data/equities/adjust/factors.parquet' f
+  ON s.symbol = f.symbol AND s.date BETWEEN f.from_date AND f.to_date
+WHERE s.symbol = 'RELIANCE' AND s.series = 'EQ'
+```
+
+Limits: Upstox's daily history starts in 2003, so earlier events are missing, though
+later ones still adjust earlier prices. Delisted stocks aren't adjusted. A
+renamed stock is followed through its ISIN, which the files carry from
+2011-06-22 (INFOSYSTCH became INFY then). Telling a demerger from a bonus by
+price alone can fail when the two ratios lie within 0.3%.
+
+The daily job marks stocks that open and close below 0.92 or above 1.9 times
+their last close, or change ISIN, and checks them against Upstox. Upstox tokens
+expire at 03:30 IST, so it confirms them only on days you have run `calm auth`;
+until then they wait. To run it at 19:30 IST on weekdays:
+
+```sh
+cp deploy/calm-equities.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now calm-equities.timer
+```
+
 ## Writing a strategy
 
 Implement `strategy.Strategy` in `internal/strategies`, and add it to the

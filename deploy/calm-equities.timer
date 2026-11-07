@@ -1,0 +1,12 @@
+[Unit]
+Description=calm stock prices, 19:30 IST after each weekday close
+
+[Timer]
+# NSE's bhavcopy lands by about 18:00 IST. An Upstox login that day lets the
+# run confirm splits and bonuses; without one they wait for the next run.
+OnCalendar=Mon..Fri 19:30 Asia/Kolkata
+# If the machine was off, run at next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
