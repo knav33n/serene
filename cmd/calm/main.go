@@ -927,7 +927,16 @@ func runResearch(ctx context.Context, action, path, holdoutPath string, unseal b
 	if unsealed {
 		fmt.Fprintf(os.Stderr, "UNSEALED: this run reads held-back data in %s, and the ledger records it\n", c.DataDir)
 	}
-	r := researchRun{c: c, spec: spec, unsealed: unsealed, ledger: analytics.LedgerPath(c.DataDir)}
+	configSHA, err := analytics.FileSHA256(path)
+	if err != nil {
+		return err
+	}
+	costsSHA, err := analytics.FileSHA256(c.CostsFile)
+	if err != nil {
+		return err
+	}
+	r := researchRun{c: c, spec: spec, unsealed: unsealed, ledger: analytics.LedgerPath(c.DataDir),
+		configPath: path, configSHA: configSHA, costsSHA: costsSHA}
 	store, err := data.Open(c.DataDir)
 	if err != nil {
 		return err
@@ -959,10 +968,15 @@ type researchRun struct {
 	spec     analytics.Spec
 	unsealed bool
 	ledger   string
+
+	configPath, configSHA, costsSHA string
 }
 
 // record adds the run's trials to the ledger and returns the strategy's total.
 func (r researchRun) record(recs ...analytics.TrialRecord) (analytics.Provenance, error) {
+	for i := range recs {
+		recs[i].Config = r.configSHA
+	}
 	if err := analytics.AppendTrials(r.ledger, recs); err != nil {
 		return analytics.Provenance{}, fmt.Errorf("trial ledger: %w", err)
 	}
@@ -1000,6 +1014,10 @@ func backtest(ctx context.Context, store *data.Store, r researchRun) error {
 	}
 	reportPath := filepath.Join(c.ReportDir, fmt.Sprintf("%s-%s.html", spec.Strategy, spec.Underlying))
 	if err := analytics.WriteReport(reportPath, o, slip, prov); err != nil {
+		return err
+	}
+	manifest := analytics.NewManifest(o, prov, r.configPath, r.configSHA, r.costsSHA, c.DataDir, time.Now())
+	if err := analytics.WriteManifest(strings.TrimSuffix(reportPath, ".html")+".json", manifest); err != nil {
 		return err
 	}
 	fmt.Println("report:", reportPath)

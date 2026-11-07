@@ -28,6 +28,7 @@ type TrialRecord struct {
 	Count    int          `json:"count"`
 	Unsealed bool         `json:"unsealed,omitempty"`
 	Revision string       `json:"revision,omitempty"`
+	Config   string       `json:"config_sha256,omitempty"`
 	Net      market.Paise `json:"net_paise"`
 	Sharpe   float64      `json:"sharpe"`
 	Trades   int          `json:"trades"`

@@ -97,3 +97,26 @@ func TestRejectionsGroupByReason(t *testing.T) {
 		t.Fatalf("rows = %+v", rows)
 	}
 }
+
+func TestManifestWrites(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "run.yaml")
+	os.WriteFile(cfg, []byte("strategy: s\n"), 0o644)
+	sha, err := FileSHA256(cfg)
+	if err != nil || len(sha) != 64 {
+		t.Fatalf("sha %q, %v", sha, err)
+	}
+	o := Outcome{Spec: Spec{Strategy: "s", Underlying: "NIFTY", From: date(t, "2025-01-01"), To: date(t, "2025-02-01")},
+		Metrics: Metrics{Trades: 4, Rejected: 1}}
+	m := NewManifest(o, Provenance{Trials: 3}, cfg, sha, "c0575", "data/upstox", time.Now())
+	path := filepath.Join(dir, "out", "r.json")
+	if err := WriteManifest(path, m); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	for _, want := range []string{`"config_sha256": "` + sha, `"trials": 3`, `"from": "2025-01-01"`, `"revision": "`, `"rejected": 1`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("manifest missing %s:\n%s", want, b)
+		}
+	}
+}
