@@ -357,3 +357,63 @@ func (s *Store) EquityFactors(ctx context.Context, symbol string) ([]FactorRow, 
 	}
 	return out, rows.Err()
 }
+
+// PanelDay is one stock's day in rupees, adjusted with FactorAll so returns
+// across splits, bonuses, demergers and rights issues are comparable.
+// Eligible means the stock was among the most traded in the previous month.
+type PanelDay struct {
+	Symbol     string
+	Date       market.Date
+	O, H, L, C float64
+	Eligible   bool
+}
+
+// EquityPanel returns the adjusted daily prices, ordered by symbol and date,
+// from from to to, of every stock that was ever among the top most traded by
+// average daily turnover in a calendar month. A day is eligible when its
+// stock was in that list for the month before, so membership uses only past
+// data. Symbols are taken as they are; a renamed stock starts a new history.
+func (s *Store) EquityPanel(ctx context.Context, from, to market.Date, top int) ([]PanelDay, error) {
+	glob, ok, err := s.equityGlob()
+	if err != nil || !ok {
+		return nil, err
+	}
+	factors := filepath.Join(s.root, "adjust", "factors.parquet")
+	if _, err := os.Stat(factors); err != nil {
+		return nil, fmt.Errorf("no adjustment factors at %s; run calm equities adjust", factors)
+	}
+	rows, err := s.db.QueryContext(ctx, `WITH raw AS (
+			SELECT date, symbol, open, high, low, close, turnover
+			FROM read_parquet(`+quote(glob)+`, hive_partitioning = false)
+			WHERE series IN `+EquitySeries+` AND date BETWEEN CAST($1 AS DATE) - INTERVAL 40 DAY AND CAST($2 AS DATE)
+			QUALIFY row_number() OVER (PARTITION BY symbol, date ORDER BY series = 'EQ' DESC, volume DESC) = 1),
+		m AS (SELECT symbol, date_trunc('month', date) AS mo, avg(turnover) AS t FROM raw GROUP BY ALL),
+		top AS (SELECT symbol, CAST(mo + INTERVAL 1 MONTH AS DATE) AS elig FROM m
+			QUALIFY row_number() OVER (PARTITION BY mo ORDER BY t DESC) <= $3),
+		syms AS (SELECT DISTINCT symbol FROM top)
+		SELECT r.symbol, r.date, r.open * f, r.high * f, r.low * f, r.close * f, t.symbol IS NOT NULL
+		FROM (SELECT r.*, coalesce(fa.factor_all, 1) / 100.0 AS f FROM raw r
+			LEFT JOIN read_parquet(`+quote(factors)+`) fa ON fa.symbol = r.symbol AND r.date BETWEEN fa.from_date AND fa.to_date) r
+		JOIN syms USING (symbol)
+		LEFT JOIN top t ON t.symbol = r.symbol AND t.elig = CAST(date_trunc('month', r.date) AS DATE)
+		WHERE r.date >= CAST($1 AS DATE) AND r.open > 0 AND r.high > 0 AND r.low > 0 AND r.close > 0
+		ORDER BY r.symbol, r.date`, from.String(), to.String(), top)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PanelDay
+	for rows.Next() {
+		var (
+			p   PanelDay
+			day time.Time
+		)
+		if err := rows.Scan(&p.Symbol, &day, &p.O, &p.H, &p.L, &p.C, &p.Eligible); err != nil {
+			return nil, err
+		}
+		y, mo, d := day.Date()
+		p.Date = market.Date{Year: y, Month: mo, Day: d}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

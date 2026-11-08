@@ -43,6 +43,17 @@ func lhbRun(t *testing.T, store *data.Store, from, to market.Date, resume *engin
 func lhbRunWith(t *testing.T, store *data.Store, from, to market.Date, resume *engine.Resume,
 	params strategy.Params, states map[market.Date]string) (engine.Result, error) {
 	t.Helper()
+	return runNamed(t, store, from, to, resume, "lower_high_break", params, states)
+}
+
+func lhbRunWithStrategy(t *testing.T, store *data.Store, from, to market.Date, name string, params strategy.Params) (engine.Result, error) {
+	t.Helper()
+	return runNamed(t, store, from, to, nil, name, params, nil)
+}
+
+func runNamed(t *testing.T, store *data.Store, from, to market.Date, resume *engine.Resume,
+	name string, params strategy.Params, states map[market.Date]string) (engine.Result, error) {
+	t.Helper()
 	ctx := context.Background()
 	contracts, err := store.Contracts(ctx, "NIFTY")
 	if err != nil {
@@ -52,7 +63,7 @@ func lhbRunWith(t *testing.T, store *data.Store, from, to market.Date, resume *e
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New("lower_high_break", "NIFTY", params)
+	s, err := New(name, "NIFTY", params)
 	if err != nil {
 		t.Fatal(err)
 	}

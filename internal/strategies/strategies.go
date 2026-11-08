@@ -1,5 +1,5 @@
-// Package strategies holds the strategy registry, two example strategies and
-// lower_high_break. The examples demonstrate the interface; none of them is a
+// Package strategies holds the strategy registry, two example strategies,
+// lower_high_break and rsi_divergence. The examples demonstrate the interface; none of them is a
 // trading recommendation.
 package strategies
 
@@ -15,6 +15,7 @@ var registry = map[string]func(underlying string, p strategy.Params) (strategy.S
 	"short_straddle":   newShortStraddle,
 	"breakout":         newBreakout,
 	"lower_high_break": newLowerHighBreak,
+	"rsi_divergence":   newRSIDivergence,
 }
 
 // Rejected maps each strategy that failed its test to a note saying where
@@ -22,6 +23,7 @@ var registry = map[string]func(underlying string, p strategy.Params) (strategy.S
 // reproduced, but research runs warn, and none should go to paper or live.
 var Rejected = map[string]string{
 	"lower_high_break": "failed its holdout on 2026-11-08 (PF 0.44 on 2026-05-01 to 2026-11-03); see docs/strategies/rejected/lower_high_break.md",
+	"rsi_divergence":   "no edge in five option trials or on daily stocks, 2026-11-08 (best PF 1.09 on 12 trades); see docs/strategies/rejected/rsi_divergence.md",
 }
 
 // New builds a strategy by name.

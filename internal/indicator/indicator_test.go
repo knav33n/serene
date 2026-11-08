@@ -61,3 +61,17 @@ func TestADX(t *testing.T) {
 		t.Errorf("choppy series has ADX %.1f", c[39])
 	}
 }
+
+func TestRSI(t *testing.T) {
+	closes := []float64{10, 11, 10, 12, 11}
+	var bars []market.Bar
+	for i, c := range closes {
+		bars = append(bars, bar(6, i, c, c, c, 0))
+	}
+	got := RSI(bars, 2)
+	// Seed: gains (1+0)/2, losses (0+1)/2 → 50. Then +2: gain (0.5+2)/2=1.25,
+	// loss 0.25 → 100-100/6. Then -1: gain 0.625, loss 0.625 → 50.
+	if !math.IsNaN(got[0]) || !math.IsNaN(got[1]) || !near(got[2], 50) || !near(got[3], 100-100.0/6) || !near(got[4], 50) {
+		t.Fatalf("rsi %v", got)
+	}
+}

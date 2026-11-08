@@ -55,6 +55,7 @@ const usage = `calm researches and trades Indian index options.
   calm research swings      --date DATE [--underlying NIFTY] [--strike 0] [--expiry DATE] [--k 2] [--min-pullback 10] [--ema 21] [--vwap=true] [--exit-k 1] [--verbose]
   calm research stops       [--from 2024-12-27] [--to 2026-04-30] [--flat 15:15] [--data DIR] (same entry flags as swings)
   calm research grid        [--from DATE] [--to DATE] [--split 2025-09-01] [--out reports/grid.csv]
+  calm research stockdiv    [--from 2005-01-01] [--to 2022-12-31] [--top 200] [--cost-pct 0.24] [--slip-bps 10] [--data DIR]
 
   calm market fetch         [--from DATE] [--to DATE] [--rebuild] [--data DIR] [--catalog FILE]
   calm market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
@@ -154,6 +155,8 @@ func run(ctx context.Context, args []string) error {
 		return runStops(ctx, rest)
 	case "research grid":
 		return runGrid(ctx, rest)
+	case "research stockdiv":
+		return runStockDiv(ctx, rest)
 	case "market fetch":
 		return runMarketFetch(ctx, rest)
 	case "market report":

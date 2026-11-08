@@ -129,3 +129,39 @@ func ADX(bars []market.Bar, n int) []float64 {
 	}
 	return out
 }
+
+// RSI returns Wilder's n-bar relative strength index of closes, from 0 to
+// 100. The average gain and loss are seeded with the simple average of the
+// first n changes and then smoothed as Wilder did, so it is NaN for the first
+// n bars. With no losses it is 100, and with no moves at all 50.
+func RSI(bars []market.Bar, n int) []float64 {
+	out := make([]float64, len(bars))
+	var gain, loss float64
+	for i := range bars {
+		out[i] = math.NaN()
+		if i == 0 {
+			continue
+		}
+		d := bars[i].Close.Rupees() - bars[i-1].Close.Rupees()
+		g, l := max(d, 0), max(-d, 0)
+		switch {
+		case i < n:
+			gain, loss = gain+g, loss+l
+			continue
+		case i == n:
+			gain, loss = (gain+g)/float64(n), (loss+l)/float64(n)
+		default:
+			gain = (gain*float64(n-1) + g) / float64(n)
+			loss = (loss*float64(n-1) + l) / float64(n)
+		}
+		switch {
+		case loss == 0 && gain == 0:
+			out[i] = 50
+		case loss == 0:
+			out[i] = 100
+		default:
+			out[i] = 100 - 100/(1+gain/loss)
+		}
+	}
+	return out
+}

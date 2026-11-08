@@ -1,0 +1,40 @@
+# Bullish RSI divergence on the ATM call or put's own 5-minute chart, at the
+# day's open strike, on real Upstox data up to the holdout seal. Defaults are
+# textbook choices, not tuned.
+strategy: rsi_divergence
+underlying: NIFTY
+from: "2024-12-27"
+to: "2026-04-30"
+capital: 100000
+data_dir: data/upstox
+settlement: data/market
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  timeframe: 5 # minutes per bar
+  rsi: 14
+  pivot_bars: 2 # bars each side of a swing low
+  min_gap: 3 # bars between the two lows
+  max_gap: 24
+  oversold: 40 # RSI at the first low below this; 0 turns it off
+  min_drop_pct: 0 # second low at least this % below the first
+  target_r: 2 # target at 2x the risk to the stop; 0 turns it off
+  rsi_exit: 0 # sell when RSI reaches this; 0 turns it off
+  hold_minutes: 0 # 0 turns it off
+  max_trades: 0 # per leg per day; 0 no limit
+  exit_minute: 360 # 15:15; no entries from then
+  size_capital: 100000
+  alloc_pct: 25
+  max_lots: 5
+  strike_step: 100
+  warm_from_minute: 165
+  warm_strikes: 4
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12
