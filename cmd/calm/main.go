@@ -66,6 +66,8 @@ const usage = `calm researches and trades Indian index options.
   calm equities adjust      [--symbols A,B] [--recheck] [--data DIR]
   calm equities daily       [--data DIR]
 
+  calm mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
+
 Not built yet:
   calm prod paper, calm prod live
 `
@@ -168,6 +170,8 @@ func run(ctx context.Context, args []string) error {
 		return runEquitiesAdjust(ctx, rest)
 	case "equities daily":
 		return runEquitiesDaily(ctx, rest)
+	case "mcx fetch":
+		return runMCXFetch(ctx, rest)
 	case "prod paper", "prod live":
 		return fmt.Errorf("%q is not built yet", cmd)
 	}
