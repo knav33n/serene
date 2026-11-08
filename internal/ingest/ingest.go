@@ -22,7 +22,7 @@ import (
 )
 
 // IndexKeys maps supported underlyings to Upstox instrument keys.
-var IndexKeys = map[string]string{"NIFTY": "NSE_INDEX|Nifty 50"}
+var IndexKeys = map[string]string{"NIFTY": "NSE_INDEX|Nifty 50", "BANKNIFTY": "NSE_INDEX|Nifty Bank"}
 
 // bandWindow is how long before expiry the index range is measured.
 const bandWindow = 30
