@@ -157,3 +157,27 @@ func TestRateLimitedCandlesAreNotSplit(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveOptionContracts(t *testing.T) {
+	var query string
+	c := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Path + "?" + r.URL.RawQuery
+		fmt.Fprint(w, `{"status":"success","data":[{"instrument_key":"NSE_FO|40001","expiry":"2026-11-10","instrument_type":"CE","strike_price":24500,"lot_size":65}]}`)
+	})
+	got, err := c.LiveOptionContracts(context.Background(), "NSE_INDEX|Nifty 50", market.Date{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "/v2/option/contract?instrument_key=NSE_INDEX%7CNifty+50" {
+		t.Errorf("query %s", query)
+	}
+	if len(got) != 1 || got[0].Key != "NSE_FO|40001" || got[0].Expiry != "2026-11-10" || got[0].Strike != 24500 {
+		t.Errorf("got %+v", got)
+	}
+	if _, err := c.LiveOptionContracts(context.Background(), "k", market.Date{Year: 2026, Month: time.November, Day: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "expiry_date=2026-11-10") {
+		t.Errorf("query %s", query)
+	}
+}

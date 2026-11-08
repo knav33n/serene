@@ -1,5 +1,6 @@
-// Package strategies holds the strategy registry and two example strategies.
-// The examples demonstrate the interface; they are not trading recommendations.
+// Package strategies holds the strategy registry, two example strategies and
+// lower_high_break. The examples demonstrate the interface; none of them is a
+// trading recommendation.
 package strategies
 
 import (
@@ -11,8 +12,16 @@ import (
 )
 
 var registry = map[string]func(underlying string, p strategy.Params) (strategy.Strategy, error){
-	"short_straddle": newShortStraddle,
-	"breakout":       newBreakout,
+	"short_straddle":   newShortStraddle,
+	"breakout":         newBreakout,
+	"lower_high_break": newLowerHighBreak,
+}
+
+// Rejected maps each strategy that failed its test to a note saying where
+// the write-up is. They stay in the registry so past results can be
+// reproduced, but research runs warn, and none should go to paper or live.
+var Rejected = map[string]string{
+	"lower_high_break": "failed its holdout on 2026-11-08 (PF 0.44 on 2026-05-01 to 2026-11-03); see docs/strategies/rejected/lower_high_break.md",
 }
 
 // New builds a strategy by name.

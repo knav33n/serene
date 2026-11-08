@@ -111,6 +111,16 @@ Zerodha and Upstox, so none of this is specific to one broker.
 Not built: a strategy warm-up interface, since neither strategy needs history
 from before the day.
 
+## Rejected strategies
+
+A strategy that fails its test keeps its code and configs and gets a write-up in
+`docs/strategies/rejected/`. Add it to `strategies.Rejected` so research runs
+warn, and leave its trial ledger entries alone, since they are what later trial
+counts are measured against. Delete the code only when it gets in the way, in a
+commit that points to the write-up.
+
+- `lower_high_break`: failed its holdout on 2026-11-08.
+
 ## Step 6: Paper
 
 Kite ticker feed, simulated fills on live bid/ask, an append-only JSONL order

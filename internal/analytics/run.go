@@ -33,6 +33,9 @@ type Spec struct {
 	// Risk sets pre-trade limits; nil runs with margin checks only. Each run
 	// gets its own gate, so parallel sweeps do not share halts or order counts.
 	Risk *risk.Limits
+	// Regime is the market regime at each date's close, for strategies that
+	// filter on it. It is shared read-only between parallel runs.
+	Regime map[market.Date]string
 }
 
 // Outcome is a finished backtest.
@@ -58,6 +61,9 @@ func Run(ctx context.Context, store *data.Store, s Spec) (Outcome, error) {
 	strat, err := strategies.New(s.Strategy, s.Underlying, s.Params)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if ru, ok := strat.(strategy.RegimeUser); ok && s.Regime != nil {
+		ru.SetRegime(s.Regime)
 	}
 	b, err := sim.New(s.Sim)
 	if err != nil {

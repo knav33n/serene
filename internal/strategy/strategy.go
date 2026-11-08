@@ -124,3 +124,10 @@ func ATMPair(chain []Quote, spot market.Paise) (ce, pe Quote, ok bool) {
 	}
 	return ce, pe, ok
 }
+
+// RegimeUser is a strategy that filters on the daily market regime. A run
+// with a regime calls SetRegime once before the first bar, with the state at
+// each date's close ("Bull", "Neutral" or "Bear").
+type RegimeUser interface {
+	SetRegime(states map[market.Date]string)
+}

@@ -176,9 +176,10 @@ func (c *Client) Expiries(ctx context.Context, indexKey string) ([]market.Date, 
 	return out, nil
 }
 
-// Contract is an expired option contract.
+// Contract is an option contract.
 type Contract struct {
 	Key     string  `json:"instrument_key"`
+	Expiry  string  `json:"expiry"`
 	Symbol  string  `json:"trading_symbol"`
 	Type    string  `json:"instrument_type"`
 	Strike  float64 `json:"strike_price"`
@@ -191,6 +192,18 @@ func (c *Client) OptionContracts(ctx context.Context, indexKey string, expiry ma
 	var out []Contract
 	q := url.Values{"instrument_key": {indexKey}, "expiry_date": {expiry.String()}}
 	err := c.get(ctx, "/v2/expired-instruments/option/contract?"+q.Encode(), &out)
+	return out, err
+}
+
+// LiveOptionContracts lists the contracts of an index's unexpired options. A
+// zero expiry lists every listed expiry.
+func (c *Client) LiveOptionContracts(ctx context.Context, indexKey string, expiry market.Date) ([]Contract, error) {
+	var out []Contract
+	q := url.Values{"instrument_key": {indexKey}}
+	if expiry != (market.Date{}) {
+		q.Set("expiry_date", expiry.String())
+	}
+	err := c.get(ctx, "/v2/option/contract?"+q.Encode(), &out)
 	return out, err
 }
 
@@ -264,8 +277,15 @@ func (c *Client) ExpiredCandles(ctx context.Context, expiredKey string, from, to
 	return parseCandles(d)
 }
 
-// IndexCandles returns 1-minute candles. Upstox limits a request to one month.
+// IndexCandles returns an index's 1-minute candles.
 func (c *Client) IndexCandles(ctx context.Context, key string, from, to market.Date) ([]Candle, error) {
+	return c.Candles(ctx, key, from, to)
+}
+
+// Candles returns 1-minute candles, newest first, of any instrument that is
+// still listed: an index, a stock or an unexpired contract. Upstox limits a
+// request to one month.
+func (c *Client) Candles(ctx context.Context, key string, from, to market.Date) ([]Candle, error) {
 	var d candleData
 	path := fmt.Sprintf("/v3/historical-candle/%s/minutes/1/%s/%s", url.PathEscape(key), to, from)
 	if err := c.get(ctx, path, &d); err != nil {

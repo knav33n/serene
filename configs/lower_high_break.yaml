@@ -1,0 +1,36 @@
+# The 5-minute lower-high breakout on real Upstox data, up to the holdout seal.
+# Research (calm research grid) picked the 15-minute hold and the pullback-low
+# stop with the trail; this run adds next-minute fills and slippage.
+strategy: lower_high_break
+underlying: NIFTY
+from: "2024-12-27"
+to: "2026-04-30"
+capital: 100000
+data_dir: data/upstox
+settlement: data/market
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  timeframe: 5 # minutes per bar
+  swing_bars: 2 # bars each side of a swing high
+  min_pullback_pct: 10
+  ema: 21 # entry close above this EMA; 0 turns it off
+  vwap: 1 # entry close above the session VWAP; 0 turns it off
+  trail_bars: 1 # bars each side of a higher low on closes; 0 turns the trail off
+  hold_minutes: 15
+  exit_minute: 360 # 15:15; no entries from then
+  size_capital: 100000 # sizing base, not compounded
+  alloc_pct: 25 # of size_capital in premium per trade
+  max_lots: 5
+  strike_step: 100 # the day's open rounded to this
+  warm_from_minute: 165 # 12:00; record strikes around spot for tomorrow's EMA
+  warm_strikes: 4 # each side of spot
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12 # of index notional; only short options use it

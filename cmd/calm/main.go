@@ -32,6 +32,7 @@ import (
 	"calm/internal/risk"
 	"calm/internal/sim"
 	"calm/internal/slack"
+	"calm/internal/strategies"
 	"calm/internal/strategy"
 	"calm/internal/synth"
 	"calm/internal/upstox"
@@ -51,6 +52,9 @@ const usage = `calm researches and trades Indian index options.
 
   calm research fetch       [--underlying NIFTY] [--from DATE] [--to DATE] [--band-pct 5] [--data DIR]
   calm research coverage    [--underlying NIFTY] [--data DIR]
+  calm research swings      --date DATE [--underlying NIFTY] [--strike 0] [--expiry DATE] [--k 2] [--min-pullback 10] [--ema 21] [--vwap=true] [--exit-k 1] [--verbose]
+  calm research stops       [--from 2024-12-27] [--to 2026-04-30] [--flat 15:15] [--data DIR] (same entry flags as swings)
+  calm research grid        [--from DATE] [--to DATE] [--split 2025-09-01] [--out reports/grid.csv]
 
   calm market fetch         [--from DATE] [--to DATE] [--rebuild] [--data DIR] [--catalog FILE]
   calm market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
@@ -142,6 +146,12 @@ func run(ctx context.Context, args []string) error {
 		return runFetch(ctx, rest)
 	case "research coverage":
 		return runCoverage(ctx, rest)
+	case "research swings":
+		return runSwings(ctx, rest)
+	case "research stops":
+		return runStops(ctx, rest)
+	case "research grid":
+		return runGrid(ctx, rest)
 	case "market fetch":
 		return runMarketFetch(ctx, rest)
 	case "market report":
@@ -1156,10 +1166,45 @@ func settlementCloses(ctx context.Context, c config, spec analytics.Spec) (map[m
 	return closes, nil
 }
 
+// regimeStates is the calm market regime at each date's close, built from the
+// settlement data directory's index history. A date's state uses only that
+// date and earlier, so a strategy reading the previous close sees nothing
+// from the future.
+func regimeStates(ctx context.Context, c config) (map[market.Date]string, error) {
+	if c.Settlement == "" || c.Settlement == "last_bar" {
+		return nil, errors.New("the regime filter needs settlement set to the NSE data directory")
+	}
+	cat, err := nse.LoadCatalog("configs/indices.yaml")
+	if err != nil {
+		return nil, err
+	}
+	store, err := data.Open(c.Settlement)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	rows, err := loadIndexRows(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	days := regime.Timeline(regime.NewPanel(rows, marketMeta(cat)))
+	if len(days) == 0 {
+		return nil, fmt.Errorf("no regime history in %s", c.Settlement)
+	}
+	out := make(map[market.Date]string, len(days))
+	for _, d := range days {
+		out[d.Date] = string(d.State)
+	}
+	return out, nil
+}
+
 func runResearch(ctx context.Context, action, path, holdoutPath string, unseal bool) error {
 	c, spec, err := loadConfig(path)
 	if err != nil {
 		return err
+	}
+	if note, ok := strategies.Rejected[spec.Strategy]; ok {
+		fmt.Fprintf(os.Stderr, "REJECTED: %s %s\n", spec.Strategy, note)
 	}
 	holdouts, err := analytics.LoadHoldouts(holdoutPath)
 	if err != nil {
@@ -1190,6 +1235,13 @@ func runResearch(ctx context.Context, action, path, holdoutPath string, unseal b
 	if spec.Closes, err = settlementCloses(ctx, c, spec); err != nil {
 		return err
 	}
+	if _, swept := c.Sweep.Grid["regime"]; spec.Params["regime"] != 0 || swept {
+		if spec.Regime, err = regimeStates(ctx, c); err != nil {
+			return err
+		}
+	}
+	// r was built from spec before the closes and regime were loaded.
+	r.spec = spec
 	metric := c.Sweep.Metric
 	if metric == "" {
 		metric = "sharpe"
@@ -1291,10 +1343,10 @@ func sweep(ctx context.Context, store *data.Store, r researchRun, metric string)
 		recs = append(recs, analytics.Record("sweep", v, t.Metrics, 1, r.unsealed, rev, now))
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "params\tnet\tsharpe\tmax dd\ttrades\twin rate")
+	fmt.Fprintln(w, "params\tnet\tsharpe\tmax dd\ttrades\twin rate\tpf")
 	for _, t := range trials {
 		m := t.Metrics
-		fmt.Fprintf(w, "%s\t₹%s\t%.2f\t%.2f%%\t%d\t%.1f%%\n", paramString(t.Params), m.Net, m.Sharpe, m.MaxDrawdownPct, m.Trades, m.WinRatePct)
+		fmt.Fprintf(w, "%s\t₹%s\t%.2f\t%.2f%%\t%d\t%.1f%%\t%.2f\n", paramString(t.Params), m.Net, m.Sharpe, m.MaxDrawdownPct, m.Trades, m.WinRatePct, m.ProfitFactor)
 	}
 	w.Flush()
 	if best, ok := analytics.Best(trials, metric); ok {
