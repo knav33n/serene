@@ -1,0 +1,34 @@
+# The one-time holdout check of ema_cross_first on 2026-05-01 to 2026-11-03,
+# data no EMA research looked at. Rules frozen 2026-11-08, params identical
+# to configs/ema_cross_first.yaml. Pass criteria, set before running: net
+# positive at 30 bps slippage, profit factor at least 1.2, and not negative at
+# 2x slippage. About 26 trades, under the 30 the forward test needs, so a pass
+# is provisional and the forward test still runs.
+strategy: ema_cross_first
+underlying: NIFTY
+from: "2026-05-01"
+to: "2026-11-03" # last expiry in the Upstox data
+capital: 100000
+data_dir: data/upstox
+settlement: data/market
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  fast: 3 # EMA of 1-minute closes on the option's own chart
+  slow: 8
+  dte: 1 # trading days to the nearest expiry: the day before expiry
+  last_entry_minute: 345 # 15:00; no entries from then
+  exit_minute: 360 # 15:15
+  lots: 1
+  strike_step: 50 # the day's index open rounded to this
+  warm_from_minute: 165 # 12:00; record strikes around spot for tomorrow's EMAs
+  warm_strikes: 40 # each side of spot, to cover big gaps
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12 # only short options use it

@@ -1,0 +1,33 @@
+# The forward test of ema_cross_first, frozen 2026-11-08: these params must
+# not change. Judge it only on expiries after 2026-11-03. Pass criteria, set
+# before any of that data exists: at least 30 trades, net positive at 30 bps
+# slippage, profit factor at least 1.2, and not negative at 2x slippage. See
+# docs/strategies/ema_cross_first.md.
+strategy: ema_cross_first
+underlying: NIFTY
+from: "2026-11-04" # first day after the data the rules were chosen on
+to: "2027-06-30" # set to the last expiry fetched when judging
+capital: 100000
+data_dir: data/upstox
+settlement: data/market
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  fast: 3 # EMA of 1-minute closes on the option's own chart
+  slow: 8
+  dte: 1 # trading days to the nearest expiry: the day before expiry
+  last_entry_minute: 345 # 15:00; no entries from then
+  exit_minute: 360 # 15:15
+  lots: 1
+  strike_step: 50 # the day's index open rounded to this
+  warm_from_minute: 165 # 12:00; record strikes around spot for tomorrow's EMAs
+  warm_strikes: 40 # each side of spot, to cover big gaps
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12 # only short options use it

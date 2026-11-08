@@ -1,0 +1,33 @@
+# ema_cross_first on the research window, to check that the engine
+# reproduces `calm research emacross` (1DTE, option chart, 1-minute, 3/8,
+# first trade a day: +Rs 12,030 at 30 bps on 70 trades). Rules frozen
+# 2026-11-08; see docs/strategies/ema_cross_first.md. Do not retune on this
+# window.
+strategy: ema_cross_first
+underlying: NIFTY
+from: "2024-12-27"
+to: "2026-04-30"
+capital: 100000
+data_dir: data/upstox
+settlement: data/market
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  fast: 3 # EMA of 1-minute closes on the option's own chart
+  slow: 8
+  dte: 1 # trading days to the nearest expiry: the day before expiry
+  last_entry_minute: 345 # 15:00; no entries from then
+  exit_minute: 360 # 15:15
+  lots: 1
+  strike_step: 50 # the day's index open rounded to this
+  warm_from_minute: 165 # 12:00; record strikes around spot for tomorrow's EMAs
+  warm_strikes: 40 # each side of spot, to cover big gaps
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12 # only short options use it

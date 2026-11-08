@@ -16,6 +16,7 @@ var registry = map[string]func(underlying string, p strategy.Params) (strategy.S
 	"breakout":         newBreakout,
 	"lower_high_break": newLowerHighBreak,
 	"rsi_divergence":   newRSIDivergence,
+	"ema_cross_first":  newEMACrossFirst,
 }
 
 // Rejected maps each strategy that failed its test to a note saying where
