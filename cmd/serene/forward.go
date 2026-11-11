@@ -59,7 +59,7 @@ func runForwardSignals(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("forward signals", flag.ContinueOnError)
 	useSlack := fs.Bool("slack", false, "post new signals to SLACK_TRADES_CHANNEL")
 	fetch := fs.Bool("fetch", false, "fetch GOLDM minute bars from Kite first")
-	only := fs.String("strategies", "goldm_ema_15m", "comma-separated: goldm_ema_15m, ema_cross_first")
+	only := fs.String("strategies", "goldm_ema_15m", "comma-separated: goldm_ema_15m, goldm_hma_1h, ema_cross_first")
 	sentPath := fs.String("sent", "data/forward_sent.json", "signals already posted")
 	alertPath := fs.String("alert", "data/forward_alert.json", "whether a failure has been posted")
 	niftyCfg := fs.String("nifty-config", "configs/ema_cross_first_forward.yaml", "ema_cross_first forward config")
@@ -105,6 +105,7 @@ func fileExists(path string) bool {
 func forwardSignals(ctx context.Context, client *slack.Client, channel string, fetch bool, only []string,
 	sentPath, niftyCfg, mcxDir, mcxCosts string) error {
 	var all []fwdSignal
+	fetchedGOLDM := false
 	for _, name := range only {
 		switch strings.TrimSpace(name) {
 		case "ema_cross_first":
@@ -113,15 +114,16 @@ func forwardSignals(ctx context.Context, client *slack.Client, channel string, f
 				return fmt.Errorf("ema_cross_first: %w", err)
 			}
 			all = append(all, s...)
-		case "goldm_ema_15m":
-			if fetch {
+		case "goldm_ema_15m", "goldm_hma_1h":
+			if fetch && !fetchedGOLDM {
+				fetchedGOLDM = true
 				if err := fetchGOLDM(ctx, mcxDir); err != nil {
 					return fmt.Errorf("GOLDM fetch: %w", err)
 				}
 			}
-			s, err := goldmEMASignals(ctx, mcxDir, mcxCosts)
+			s, err := goldmSignals(ctx, mcxDir, mcxCosts, strings.TrimSpace(name))
 			if err != nil {
-				return fmt.Errorf("goldm_ema_15m: %w", err)
+				return fmt.Errorf("%s: %w", strings.TrimSpace(name), err)
 			}
 			all = append(all, s...)
 		default:
@@ -254,10 +256,10 @@ func emaCrossFirstSignals(ctx context.Context, path string) ([]fwdSignal, error)
 	return out, nil
 }
 
-// goldmEMASignals replays the frozen GOLDM 15m 13/34 cross from its forward
-// start. The last trade's "end" exit is only where the data stops, so it is
-// left out: that position is still open.
-func goldmEMASignals(ctx context.Context, dir, costsFile string) ([]fwdSignal, error) {
+// goldmSignals replays a frozen GOLDM strategy (goldm_ema_15m or
+// goldm_hma_1h) from its forward start. The last trade's "end" exit is only
+// where the data stops, so it is left out: that position is still open.
+func goldmSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal, error) {
 	spec, ok := mcx.Specs[gemName]
 	if !ok {
 		return nil, fmt.Errorf("no contract spec for %s", gemName)
@@ -283,8 +285,12 @@ func goldmEMASignals(ctx context.Context, dir, costsFile string) ([]fwdSignal, e
 	if err != nil {
 		return nil, err
 	}
-	ts, err := mcx.EMABacktest(mcx.PrepareEMA(bars[gemName], gemFrame), mcx.EMAConfig{Name: gemName, Spec: spec,
-		Frame: gemFrame, Fast: gemFast, Slow: gemSlow, Slip: 1, Costs: costs, From: gemForward, To: to})
+	frame, cfg := gemFrame, mcx.EMAConfig{Name: gemName, Spec: spec, Frame: gemFrame, Fast: gemFast, Slow: gemSlow,
+		Slip: 1, Costs: costs, From: gemForward, To: to}
+	if strat == "goldm_hma_1h" {
+		frame, cfg = ghmFrame, ghmConfig(spec, costs, 1, ghmForward, to)
+	}
+	ts, err := mcx.EMABacktest(mcx.PrepareEMA(bars[gemName], frame), cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -294,9 +300,9 @@ func goldmEMASignals(ctx context.Context, dir, costsFile string) ([]fwdSignal, e
 		if in, err := market.ParseKey(t.Key); err == nil {
 			name = fmt.Sprintf("%s FUT (exp %s)", in.Underlying, in.Expiry)
 		}
-		out = append(out, fwdSignal{Strategy: "goldm_ema_15m", Time: t.Entry, Side: t.Side, Instrument: name, Price: t.In, Note: "enter"})
+		out = append(out, fwdSignal{Strategy: strat, Time: t.Entry, Side: t.Side, Instrument: name, Price: t.In, Note: "enter"})
 		if t.Reason != "end" {
-			out = append(out, fwdSignal{Strategy: "goldm_ema_15m", Time: t.Exit, Side: -t.Side, Instrument: name, Price: t.Out, Note: "exit, " + t.Reason})
+			out = append(out, fwdSignal{Strategy: strat, Time: t.Exit, Side: -t.Side, Instrument: name, Price: t.Out, Note: "exit, " + t.Reason})
 		}
 	}
 	return out, nil

@@ -146,7 +146,7 @@ func runMCXEMA(ctx context.Context, args []string) error {
 		return fmt.Errorf("trial ledger: %w", err)
 	}
 
-	return dailyEMA(ctx, store, *name, spec, costs, bars[*name], t)
+	return dailyEMA(ctx, store, *name, spec, costs, bars[*name], t, emaPairs, indicator.EMA, "EMA")
 }
 
 func frameText(d time.Duration) string {
@@ -156,11 +156,11 @@ func frameText(d time.Duration) string {
 	return fmt.Sprintf("%dm", int(d.Minutes()))
 }
 
-// dailyEMA runs the same pairs on the continuous daily series. Kite's
+// dailyEMA runs crossovers of pairs of the average ma on the continuous daily series. Kite's
 // continuous series is not back-adjusted: each roll to the next contract's
 // (usually higher) price shows up as a move, which favours longs.
 func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec, costs *cost.Schedule,
-	minute []market.Bar, to market.Date) error {
+	minute []market.Bar, to market.Date, pairs [][2]int, ma func([]market.Bar, int) []float64, maName string) error {
 	all, err := store.Daily(ctx, name)
 	if err != nil {
 		return err
@@ -196,9 +196,9 @@ func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec
 		long, short float64
 	}
 	var out []res
-	for _, p := range emaPairs {
+	for _, p := range pairs {
 		for _, lo := range []bool{false, true} {
-			fast, slow := indicator.EMA(days, p[0]), indicator.EMA(days, p[1])
+			fast, slow := ma(days, p[0]), ma(days, p[1])
 			r := res{label: fmt.Sprintf("%5s %-4s", fmt.Sprintf("%d/%d", p[0], p[1]), map[bool]string{false: "L+S", true: "long"}[lo])}
 			var side market.Side
 			var in float64
@@ -227,7 +227,7 @@ func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec
 			for i := 1; i < len(days); i++ {
 				var want market.Side
 				switch {
-				case math.IsNaN(slow[i-1]):
+				case math.IsNaN(slow[i-1]) || math.IsNaN(fast[i-1]):
 					continue
 				case fast[i-1] > slow[i-1]:
 					want = market.Buy
@@ -253,8 +253,8 @@ func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec
 	sort.Slice(out, func(i, j int) bool { return out[i].net > out[j].net })
 	first, last := days[0], days[len(days)-1]
 	hold := (last.Close - first.Open).Rupees() * float64(spec.Multiplier)
-	fmt.Printf("\n%s continuous daily (not back-adjusted), %s to %s; signal at close, fill next open; halves split at %s\n",
-		name, market.DateOf(first.Time), market.DateOf(last.Time), mid)
+	fmt.Printf("\n%s %s crossovers, continuous daily (not back-adjusted), %s to %s; signal at close, fill next open; halves split at %s\n",
+		name, maName, market.DateOf(first.Time), market.DateOf(last.Time), mid)
 	fmt.Printf("buy and hold 1 lot: ₹%.0f\n\n", hold)
 	fmt.Printf("%-10s %6s %5s %8s %12s %12s %12s %12s %12s\n", "pair mode", "trades", "win%", "avg %", "net ₹", "1st half ₹",
 		"2nd half ₹", "long ₹", "short ₹")

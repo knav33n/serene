@@ -34,3 +34,19 @@ func TestCleanStaleOpens(t *testing.T) {
 		t.Error("other bars changed")
 	}
 }
+
+func TestBucketMultiHourFromOpen(t *testing.T) {
+	d := market.Date{Year: 2026, Month: 11, Day: 9}
+	bars := []market.Bar{
+		minute(d.At(9, 0), 1, 2, 1, 2), minute(d.At(10, 59), 2, 3, 2, 3),
+		minute(d.At(11, 0), 3, 4, 3, 4), minute(d.At(14, 30), 4, 5, 4, 5),
+	}
+	got := Bucket(bars, 2*time.Hour)
+	if len(got) != 3 || !got[0].Time.Equal(d.At(9, 0)) || got[0].Close != market.Rupees(3) ||
+		!got[1].Time.Equal(d.At(11, 0)) || !got[2].Time.Equal(d.At(13, 0)) {
+		t.Fatalf("2h buckets %+v", got)
+	}
+	if h := Bucket(bars, time.Hour); len(h) != 4 || !h[1].Time.Equal(d.At(10, 0)) {
+		t.Fatalf("1h buckets %+v", h)
+	}
+}

@@ -165,3 +165,46 @@ func RSI(bars []market.Bar, n int) []float64 {
 	}
 	return out
 }
+
+// WMA returns the n-value linearly weighted moving average of vals, the
+// newest weighted n and the oldest 1. It is NaN until n non-NaN values have
+// been seen in a row; a NaN input leads its window, so NaN inputs at the start
+// (another average's warm-up) only delay it.
+func WMA(vals []float64, n int) []float64 {
+	out := make([]float64, len(vals))
+	den := float64(n*(n+1)) / 2
+	run := 0
+	for i, v := range vals {
+		if math.IsNaN(v) {
+			run = 0
+		} else {
+			run++
+		}
+		if run < n {
+			out[i] = math.NaN()
+			continue
+		}
+		s := 0.0
+		for k := 0; k < n; k++ {
+			s += float64(n-k) * vals[i-k]
+		}
+		out[i] = s / den
+	}
+	return out
+}
+
+// HMA returns the n-bar Hull moving average of closes in rupees:
+// WMA(2·WMA(n/2) − WMA(n), round(√n)). It is NaN for its first
+// n + round(√n) − 2 bars.
+func HMA(bars []market.Bar, n int) []float64 {
+	c := make([]float64, len(bars))
+	for i, b := range bars {
+		c[i] = b.Close.Rupees()
+	}
+	half, full := WMA(c, max(n/2, 1)), WMA(c, n)
+	d := make([]float64, len(bars))
+	for i := range d {
+		d[i] = 2*half[i] - full[i]
+	}
+	return WMA(d, max(int(math.Round(math.Sqrt(float64(n)))), 1))
+}

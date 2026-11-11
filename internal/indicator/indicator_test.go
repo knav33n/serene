@@ -75,3 +75,38 @@ func TestRSI(t *testing.T) {
 		t.Fatalf("rsi %v", got)
 	}
 }
+
+func TestWMA(t *testing.T) {
+	got := WMA([]float64{math.NaN(), 1, 2, 3, 6}, 3)
+	// (3*3+2*2+1)/6 = 14/6; (3*6+2*3+2)/6 = 26/6
+	if !math.IsNaN(got[0]) || !math.IsNaN(got[2]) || !near(got[3], 14.0/6) || !near(got[4], 26.0/6) {
+		t.Fatalf("wma %v", got)
+	}
+}
+
+func TestHMA(t *testing.T) {
+	cl := []float64{10, 11, 13, 12, 15, 17, 16, 18, 20}
+	bars := make([]market.Bar, len(cl))
+	for i, c := range cl {
+		bars[i] = bar(6, i, 0, 0, c, 0)
+	}
+	got := HMA(bars, 4) // WMA(2·WMA2 − WMA4, 2)
+	for i := 0; i < 4; i++ {
+		if !math.IsNaN(got[i]) {
+			t.Fatalf("hma[%d] = %v, want NaN", i, got[i])
+		}
+	}
+	w := func(v []float64) float64 { // newest last
+		s, d := 0.0, 0.0
+		for k, x := range v {
+			s += float64(k+1) * x
+			d += float64(k + 1)
+		}
+		return s / d
+	}
+	diff := func(i int) float64 { return 2*w(cl[i-1:i+1]) - w(cl[i-3:i+1]) }
+	want := w([]float64{diff(7), diff(8)})
+	if !near(got[8], want) {
+		t.Fatalf("hma[8] = %v, want %v", got[8], want)
+	}
+}

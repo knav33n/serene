@@ -75,8 +75,12 @@ func Bucket(bars []market.Bar, d time.Duration) []market.Bar {
 	for _, b := range bars {
 		t := b.Time.In(market.IST)
 		start := t.Truncate(d) // IST is a whole number of minutes from UTC
-		if d >= time.Hour {
-			start = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, market.IST)
+		if d >= time.Hour { // whole frames counted from the 09:00 open
+			open := time.Date(t.Year(), t.Month(), t.Day(), 9, 0, 0, 0, market.IST)
+			start = open.Add(t.Sub(open) / d * d)
+			if t.Before(open) {
+				start = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, market.IST)
+			}
 		}
 		if n := len(out); n > 0 && out[n-1].Time.Equal(start) {
 			o := &out[n-1]

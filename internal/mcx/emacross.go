@@ -29,6 +29,8 @@ type EMAConfig struct {
 	Fast, Slow int
 	LongOnly   bool    // flat, not short, while fast is under slow
 	MinGap     float64 // percent of slow the EMAs must part by to flip; inside it the side is kept
+	MA         func([]market.Bar, int) []float64 // average used for both lines; nil is indicator.EMA
+	Slope      bool                              // compare fast with itself two frame bars back, not with slow
 	Slip       int64
 	Costs      *cost.Schedule
 	From, To   market.Date
@@ -45,8 +47,24 @@ type EMAConfig struct {
 func EMABacktest(ed *EMAData, cfg EMAConfig) ([]Trade, error) {
 	sr := ed.sr
 	fast, slow := map[string][]float64{}, map[string][]float64{}
+	ma := cfg.MA
+	if ma == nil {
+		ma = indicator.EMA
+	}
 	for k, f := range sr.frames[cfg.Frame] {
-		fast[k], slow[k] = indicator.EMA(f, cfg.Fast), indicator.EMA(f, cfg.Slow)
+		fast[k] = ma(f, cfg.Fast)
+		if cfg.Slope {
+			s := make([]float64, len(f))
+			for i := range s {
+				s[i] = math.NaN()
+				if i >= 2 {
+					s[i] = fast[k][i-2]
+				}
+			}
+			slow[k] = s
+		} else {
+			slow[k] = ma(f, cfg.Slow)
+		}
 	}
 	var (
 		trades []Trade
@@ -100,7 +118,7 @@ func EMABacktest(ed *EMAData, cfg EMAConfig) ([]Trade, error) {
 				last = m
 			}
 			i, ok := closes[m.End]
-			if !ok || math.IsNaN(sk[i]) {
+			if !ok || math.IsNaN(sk[i]) || math.IsNaN(fk[i]) {
 				continue
 			}
 			band := sk[i] * cfg.MinGap / 100
