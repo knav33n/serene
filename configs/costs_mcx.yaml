@@ -1,0 +1,17 @@
+# Charges for MCX non-agri commodity futures on Zerodha. Percentages are as
+# quoted: 0.01 = 0.01%. stt_sell_pct carries CTT.
+#
+# Source, checked 2026-11-11: https://zerodha.com/charges/ (Commodity futures)
+#   brokerage 0.03% or ₹20 per executed order, whichever is lower; every
+#   pulse contract's turnover is far above ₹66,667, so it is ₹20 here
+#   CTT 0.01% on sell (non-agri); MCX transaction 0.0021%; SEBI ₹10/crore
+#   stamp 0.002% on buy; GST 18% on brokerage + SEBI + transaction charges
+periods:
+  - from: "2026-01-01"
+    brokerage_per_order: 20
+    stt_sell_pct: 0.01
+    stt_exercise_pct: 0
+    exchange_pct: {MCX: 0.0021}
+    sebi_pct: 0.0001
+    stamp_buy_pct: 0.002
+    gst_pct: 18

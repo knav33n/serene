@@ -4,3 +4,4 @@
 # Unseal once, for a final check of a strategy whose design is frozen. Moving the
 # date later only works if nobody has looked at the data in between.
 data/upstox: "2026-05-01"
+data/mcx: "2026-11-11"

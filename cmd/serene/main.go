@@ -57,6 +57,9 @@ const usage = `serene researches and trades Indian index options.
   serene research grid        [--from DATE] [--to DATE] [--split 2025-09-01] [--out reports/grid.csv]
   serene research emacross    [--from DATE] [--to DATE] [--split 2025-09-01] [--slip-bps 30] [--step 50] [--out reports/emacross.csv] [--trades FILE]
   serene research eventvol    [--from DATE] [--to DATE] [--split 2025-09-01] [--slip-bps 30] [--step 50] [--out reports/eventvol.csv] [--trades FILE]
+  serene research mcxcloud    [--names A,B] [--n 5] [--exit swing30|vote30|cloud30|ha30|2R] [--nine-k 1] [--table NAME] [--grid] [--trades FILE]
+  serene research mcxema      [--name GOLDM] [--from DATE] [--to DATE] [--split DATE] [--slip-ticks 1]
+  serene research mcxdow      [--names A,B] [--from DATE] [--to DATE] [--frame 1h] [--lookback 720h] [--multiple 2.5] [--slip-ticks 1] [--trades FILE]
   serene research pdbreak     [--from DATE] [--to DATE] [--split 2025-09-01] [--offset-pct 1] [--slip-bps 30] [--trades FILE]
   serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
   serene research stockdiv    [--from 2005-01-01] [--to 2022-12-31] [--top 200] [--cost-pct 0.24] [--slip-bps 10] [--data DIR]
@@ -166,6 +169,12 @@ func run(ctx context.Context, args []string) error {
 		return runEMACross(ctx, rest)
 	case "research pdbreak":
 		return runPDBreak(ctx, rest)
+	case "research mcxcloud":
+		return runMCXCloud(ctx, rest)
+	case "research mcxema":
+		return runMCXEMA(ctx, rest)
+	case "research mcxdow":
+		return runMCXDow(ctx, rest)
 	case "research eventvol":
 		return runEventVol(ctx, rest)
 	case "research dayfeatures":

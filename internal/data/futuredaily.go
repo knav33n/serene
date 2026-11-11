@@ -72,3 +72,37 @@ func (s *Store) ReplaceDaily(ctx context.Context, underlying string, bars []mark
 	}
 	return os.Rename(tmp, path)
 }
+
+// Daily returns an underlying's stored continuous daily bars, by date.
+func (s *Store) Daily(ctx context.Context, underlying string) ([]market.Bar, error) {
+	if !safeName.MatchString(underlying) {
+		return nil, fmt.Errorf("invalid underlying %q", underlying)
+	}
+	path := s.dailyPath(underlying)
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("no daily data for %s: %w", underlying, err)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT date, open, high, low, close, volume, oi
+		FROM read_parquet(`+quote(path)+`, hive_partitioning = false) ORDER BY date`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []market.Bar
+	for rows.Next() {
+		var (
+			b                   market.Bar
+			day                 time.Time
+			open, high, low, cl int64
+		)
+		if err := rows.Scan(&day, &open, &high, &low, &cl, &b.Volume, &b.OI); err != nil {
+			return nil, err
+		}
+		b.Key, b.Timeframe = underlying, market.Daily
+		b.Time = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, market.IST)
+		b.End = b.Time.AddDate(0, 0, 1)
+		b.Open, b.High, b.Low, b.Close = market.Paise(open), market.Paise(high), market.Paise(low), market.Paise(cl)
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
