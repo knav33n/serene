@@ -12,11 +12,12 @@ install -m 755 -o serene -g serene serene "$app/serene.new"
 mv "$app/serene.new" "$app/serene"
 install -d -o serene -g serene "$app/data/mcx"
 
-env=$(mktemp)
-/snap/bin/aws --region "$region" ssm get-parameter --name /serene/env --with-decryption \
-  --query Parameter.Value --output text > "$env"
-install -m 600 -o serene -g serene "$env" "$app/.env"
-rm "$env"
+# Read through $(...): the snap aws's output redirected into a /tmp file comes out empty.
+value=$(/snap/bin/aws --region "$region" ssm get-parameter --name /serene/env --with-decryption \
+  --query Parameter.Value --output text)
+grep -q '^SERENE_TOKEN_KEY=.' <<< "$value" || { echo "/serene/env has no SERENE_TOKEN_KEY: deploy/hearth/env.sh" >&2; exit 1; }
+install -m 600 -o serene -g serene /dev/null "$app/.env"
+printf '%s\n' "$value" > "$app/.env"
 
 # Again on every deploy: calm infra restore recreates project_calm, which drops the grants.
 sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d project_calm <<'SQL'
