@@ -25,9 +25,16 @@ var Specs = map[string]Spec{
 	"GOLD":       {100, 100}, // 1 kg, ₹/10 g, ₹1
 	"GOLDM":      {10, 100},  // 100 g, ₹/10 g, ₹1
 	"SILVER":     {30, 100},  // 30 kg, ₹/kg, ₹1
+	"SILVERM":    {5, 100},   // 5 kg, ₹/kg, ₹1
+	"SILVERMIC":  {1, 100},   // 1 kg, ₹/kg, ₹1
 	"COPPER":     {2500, 5},  // 2500 kg, ₹/kg, ₹0.05
 	"ZINC":       {5000, 5},  // 5 t, ₹/kg, ₹0.05
 	"ALUMINIUM":  {5000, 5},  // 5 t, ₹/kg, ₹0.05
+	"ZINCMINI":   {1000, 5},  // 1 t, ₹/kg, ₹0.05
+	"ALUMINI":    {1000, 5},  // 1 t, ₹/kg, ₹0.05
+	"LEAD":       {5000, 5},  // 5 t, ₹/kg, ₹0.05
+	"LEADMINI":   {1000, 5},  // 1 t, ₹/kg, ₹0.05
+	"NICKEL":     {250, 10},  // 250 kg, ₹/kg, ₹0.10
 }
 
 // BacktestConfig sets up a structure backtest.

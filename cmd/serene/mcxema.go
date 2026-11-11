@@ -161,9 +161,44 @@ func frameText(d time.Duration) string {
 // (usually higher) price shows up as a move, which favours longs.
 func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec, costs *cost.Schedule,
 	minute []market.Bar, to market.Date, pairs [][2]int, ma func([]market.Bar, int) []float64, maName string) error {
-	all, err := store.Daily(ctx, name)
+	d, err := dailyCross(ctx, store, name, spec, costs, minute, to, pairs, ma)
 	if err != nil {
 		return err
+	}
+	fmt.Printf("\n%s %s crossovers, continuous daily (not back-adjusted), %s to %s; signal at close, fill next open; halves split at %s\n",
+		name, maName, d.first, d.last, d.mid)
+	fmt.Printf("buy and hold 1 lot: ₹%.0f\n\n", d.hold)
+	fmt.Printf("%-10s %6s %5s %8s %12s %12s %12s %12s %12s\n", "pair mode", "trades", "win%", "avg %", "net ₹", "1st half ₹",
+		"2nd half ₹", "long ₹", "short ₹")
+	for _, r := range d.rows {
+		fmt.Printf("%-10s %6d %4.0f%% %8.2f %12.0f %12.0f %12.0f %12.0f %12.0f\n", r.label, r.n, 100*r.win/float64(max(r.n, 1)),
+			r.pctSum/float64(max(r.n, 1)), r.net, r.h1, r.h2, r.long, r.short)
+	}
+	return nil
+}
+
+// dailyRow is one pair and mode traded on the continuous daily series.
+type dailyRow struct {
+	label       string
+	n           int
+	net, h1, h2 float64
+	pctSum, win float64
+	long, short float64
+}
+
+// dailyResult holds dailyCross's rows, best net first, and buy-and-hold.
+type dailyResult struct {
+	rows             []dailyRow
+	hold             float64
+	first, last, mid market.Date
+}
+
+// dailyCross trades crossovers of pairs of ma on name's continuous daily series up to to.
+func dailyCross(ctx context.Context, store *data.Store, name string, spec mcx.Spec, costs *cost.Schedule,
+	minute []market.Bar, to market.Date, pairs [][2]int, ma func([]market.Bar, int) []float64) (dailyResult, error) {
+	all, err := store.Daily(ctx, name)
+	if err != nil {
+		return dailyResult{}, err
 	}
 	var days []market.Bar
 	for _, b := range all {
@@ -172,11 +207,11 @@ func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec
 		}
 	}
 	if len(days) < 300 || len(minute) == 0 {
-		return fmt.Errorf("not enough daily data for %s", name)
+		return dailyResult{}, fmt.Errorf("not enough daily data for %s", name)
 	}
 	inst, err := market.ParseKey(minute[len(minute)-1].Key) // for charges only
 	if err != nil {
-		return err
+		return dailyResult{}, err
 	}
 	mid := market.DateOf(days[len(days)/2].Time)
 	slip := float64(spec.Tick.Rupees())
@@ -188,18 +223,11 @@ func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec
 		}
 		return c.Rupees()
 	}
-	type res struct {
-		label       string
-		n           int
-		net, h1, h2 float64
-		pctSum, win float64
-		long, short float64
-	}
-	var out []res
+	var out []dailyRow
 	for _, p := range pairs {
 		for _, lo := range []bool{false, true} {
 			fast, slow := ma(days, p[0]), ma(days, p[1])
-			r := res{label: fmt.Sprintf("%5s %-4s", fmt.Sprintf("%d/%d", p[0], p[1]), map[bool]string{false: "L+S", true: "long"}[lo])}
+			r := dailyRow{label: fmt.Sprintf("%5s %-4s", fmt.Sprintf("%d/%d", p[0], p[1]), map[bool]string{false: "L+S", true: "long"}[lo])}
 			var side market.Side
 			var in float64
 			var inAt market.Date
@@ -252,15 +280,6 @@ func dailyEMA(ctx context.Context, store *data.Store, name string, spec mcx.Spec
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].net > out[j].net })
 	first, last := days[0], days[len(days)-1]
-	hold := (last.Close - first.Open).Rupees() * float64(spec.Multiplier)
-	fmt.Printf("\n%s %s crossovers, continuous daily (not back-adjusted), %s to %s; signal at close, fill next open; halves split at %s\n",
-		name, maName, market.DateOf(first.Time), market.DateOf(last.Time), mid)
-	fmt.Printf("buy and hold 1 lot: ₹%.0f\n\n", hold)
-	fmt.Printf("%-10s %6s %5s %8s %12s %12s %12s %12s %12s\n", "pair mode", "trades", "win%", "avg %", "net ₹", "1st half ₹",
-		"2nd half ₹", "long ₹", "short ₹")
-	for _, r := range out {
-		fmt.Printf("%-10s %6d %4.0f%% %8.2f %12.0f %12.0f %12.0f %12.0f %12.0f\n", r.label, r.n, 100*r.win/float64(max(r.n, 1)),
-			r.pctSum/float64(max(r.n, 1)), r.net, r.h1, r.h2, r.long, r.short)
-	}
-	return nil
+	return dailyResult{rows: out, hold: (last.Close - first.Open).Rupees() * float64(spec.Multiplier),
+		first: market.DateOf(first.Time), last: market.DateOf(last.Time), mid: mid}, nil
 }

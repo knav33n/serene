@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -53,13 +54,13 @@ func (s fwdSignal) text() string {
 }
 
 // runForwardSignals posts the frozen forward tests' new entries and exits.
-// With --fetch it first brings GOLDM's minute bars up to now from Kite, which
+// With --fetch it first brings the MCX minute bars up to now from Kite, which
 // is how hearth runs it each minute of the MCX session.
 func runForwardSignals(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("forward signals", flag.ContinueOnError)
 	useSlack := fs.Bool("slack", false, "post new signals to SLACK_TRADES_CHANNEL")
-	fetch := fs.Bool("fetch", false, "fetch GOLDM minute bars from Kite first")
-	only := fs.String("strategies", "goldm_ema_15m", "comma-separated: goldm_ema_15m, goldm_hma_1h, ema_cross_first")
+	fetch := fs.Bool("fetch", false, "fetch the MCX strategies' minute bars from Kite first")
+	only := fs.String("strategies", "goldm_ema_15m", "comma-separated: goldm_ema_15m, goldm_hma_1h, silverm_ema_15m, silverm_hma_1h, ema_cross_first")
 	sentPath := fs.String("sent", "data/forward_sent.json", "signals already posted")
 	alertPath := fs.String("alert", "data/forward_alert.json", "whether a failure has been posted")
 	niftyCfg := fs.String("nifty-config", "configs/ema_cross_first_forward.yaml", "ema_cross_first forward config")
@@ -105,7 +106,19 @@ func fileExists(path string) bool {
 func forwardSignals(ctx context.Context, client *slack.Client, channel string, fetch bool, only []string,
 	sentPath, niftyCfg, mcxDir, mcxCosts string) error {
 	var all []fwdSignal
-	fetchedGOLDM := false
+	if fetch {
+		var names []string
+		for _, n := range only {
+			if u := mcxForwardUnderlying(strings.TrimSpace(n)); u != "" && !slices.Contains(names, u) {
+				names = append(names, u)
+			}
+		}
+		if len(names) > 0 {
+			if err := fetchMCX(ctx, mcxDir, names); err != nil {
+				return fmt.Errorf("%s fetch: %w", strings.Join(names, ","), err)
+			}
+		}
+	}
 	for _, name := range only {
 		switch strings.TrimSpace(name) {
 		case "ema_cross_first":
@@ -114,14 +127,8 @@ func forwardSignals(ctx context.Context, client *slack.Client, channel string, f
 				return fmt.Errorf("ema_cross_first: %w", err)
 			}
 			all = append(all, s...)
-		case "goldm_ema_15m", "goldm_hma_1h":
-			if fetch && !fetchedGOLDM {
-				fetchedGOLDM = true
-				if err := fetchGOLDM(ctx, mcxDir); err != nil {
-					return fmt.Errorf("GOLDM fetch: %w", err)
-				}
-			}
-			s, err := goldmSignals(ctx, mcxDir, mcxCosts, strings.TrimSpace(name))
+		case "goldm_ema_15m", "goldm_hma_1h", "silverm_ema_15m", "silverm_hma_1h":
+			s, err := mcxSignals(ctx, mcxDir, mcxCosts, strings.TrimSpace(name))
 			if err != nil {
 				return fmt.Errorf("%s: %w", strings.TrimSpace(name), err)
 			}
@@ -176,9 +183,20 @@ func forwardSignals(ctx context.Context, client *slack.Client, channel string, f
 	return nil
 }
 
-// fetchGOLDM brings GOLDM's minute bars up to now, copying the Kite login
+// mcxForwardUnderlying is the commodity an MCX forward test trades, or "".
+func mcxForwardUnderlying(strat string) string {
+	switch {
+	case strings.HasPrefix(strat, "goldm_"):
+		return gemName
+	case strings.HasPrefix(strat, "silverm_"):
+		return smName
+	}
+	return ""
+}
+
+// fetchMCX brings names' minute bars up to now, copying the Kite login
 // from project_calm first when CALM_DATABASE_URL is set.
-func fetchGOLDM(ctx context.Context, dir string) error {
+func fetchMCX(ctx context.Context, dir string, names []string) error {
 	tokens, err := openTokens(ctx)
 	if err != nil {
 		return err
@@ -207,7 +225,7 @@ func fetchGOLDM(ctx context.Context, dir string) error {
 		return err
 	}
 	defer store.Close()
-	cfg := mcx.Config{Dir: dir, Names: []string{gemName}, Minute: true,
+	cfg := mcx.Config{Dir: dir, Names: names, Minute: true,
 		Lookback: 500 * 24 * time.Hour, Log: func(string, ...any) {}}
 	return mcx.Run(ctx, cfg, store, kite.New(apiKey, token.AccessToken), lots)
 }
@@ -256,13 +274,21 @@ func emaCrossFirstSignals(ctx context.Context, path string) ([]fwdSignal, error)
 	return out, nil
 }
 
-// goldmSignals replays a frozen GOLDM strategy (goldm_ema_15m or
-// goldm_hma_1h) from its forward start. The last trade's "end" exit is only
-// where the data stops, so it is left out: that position is still open.
-func goldmSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal, error) {
-	spec, ok := mcx.Specs[gemName]
+// mcxSignals replays a frozen MCX strategy (goldm_ema_15m, goldm_hma_1h,
+// silverm_ema_15m or silverm_hma_1h) from its forward start. The last
+// trade's "end" exit is only where the data stops, so it is left out: that
+// position is still open.
+func mcxSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal, error) {
+	name, start := gemName, gemForward
+	if strat == "goldm_hma_1h" {
+		start = ghmForward
+	}
+	if mcxForwardUnderlying(strat) == smName {
+		name, start = smName, smForward
+	}
+	spec, ok := mcx.Specs[name]
 	if !ok {
-		return nil, fmt.Errorf("no contract spec for %s", gemName)
+		return nil, fmt.Errorf("no contract spec for %s", name)
 	}
 	costs, err := cost.Load(costsFile)
 	if err != nil {
@@ -273,7 +299,7 @@ func goldmSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSigna
 		return nil, err
 	}
 	defer store.Close()
-	days, err := store.Days(gemName, gemForward, gemForward.AddDays(3650))
+	days, err := store.Days(name, start, start.AddDays(3650))
 	if err != nil {
 		return nil, err
 	}
@@ -281,16 +307,21 @@ func goldmSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSigna
 		return nil, nil
 	}
 	to := days[len(days)-1]
-	bars, err := loadMCXBars(ctx, store, []string{gemName}, gemForward.AddDays(-30), to)
+	bars, err := loadMCXBars(ctx, store, []string{name}, start.AddDays(-30), to)
 	if err != nil {
 		return nil, err
 	}
 	frame, cfg := gemFrame, mcx.EMAConfig{Name: gemName, Spec: spec, Frame: gemFrame, Fast: gemFast, Slow: gemSlow,
 		Slip: 1, Costs: costs, From: gemForward, To: to}
-	if strat == "goldm_hma_1h" {
+	switch {
+	case strat == "goldm_hma_1h":
 		frame, cfg = ghmFrame, ghmConfig(spec, costs, 1, ghmForward, to)
+	case name == smName:
+		if frame, cfg, err = smConfig(strat, spec, costs, 1, smForward, to); err != nil {
+			return nil, err
+		}
 	}
-	ts, err := mcx.EMABacktest(mcx.PrepareEMA(bars[gemName], frame), cfg)
+	ts, err := mcx.EMABacktest(mcx.PrepareEMA(bars[name], frame), cfg)
 	if err != nil {
 		return nil, err
 	}

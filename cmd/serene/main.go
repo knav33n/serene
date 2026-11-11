@@ -62,8 +62,10 @@ const usage = `serene researches and trades Indian index options.
   serene research mcxemagap   [--name GOLDM] [--from DATE] [--to DATE] [--split DATE]   (EMA crosses with a minimum gap)
   serene research mcxemaexit  [--frame 15] [--fast 13] [--slow 34] [--from DATE] [--to DATE]   (EMA cross exit rules)
   serene research mcxhma      [--name GOLDM] [--from DATE] [--to DATE] [--split DATE] [--slip-ticks 1]   (Hull MA crosses and turns)
+  serene research mcxmetals   [--names COPPER,ZINCMINI,...] [--from DATE] [--to DATE] [--split DATE] [--slip-ticks 1]   (EMA + Hull crosses on base metals)
   serene research mcxhmafwd   [--to DATE] [--judge] [--replay]   (frozen GOLDM 1h HMA-21 turn, sessions from 2026-11-11)
   serene research mcxemafwd   [--to DATE] [--judge] [--replay]   (frozen GOLDM 15m 13/34, sessions from 2026-11-11)
+  serene research silvermfwd  [--strategy silverm_ema_15m|silverm_hma_1h] [--to DATE] [--judge] [--replay]   (frozen GOLDM rules on SILVERM, sessions from 2026-11-12)
   serene research mcxdow      [--names A,B] [--from DATE] [--to DATE] [--frame 1h] [--lookback 720h] [--multiple 2.5] [--slip-ticks 1] [--trades FILE]
   serene research pdbreak     [--from DATE] [--to DATE] [--split 2025-09-01] [--offset-pct 1] [--slip-bps 30] [--trades FILE]
   serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
@@ -82,7 +84,7 @@ const usage = `serene researches and trades Indian index options.
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
 Not built yet:
-  serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
+  serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
   serene prod paper, serene prod live
 `
 
@@ -180,6 +182,10 @@ func run(ctx context.Context, args []string) error {
 		return runMCXEMA(ctx, rest)
 	case "research mcxhma":
 		return runMCXHMA(ctx, rest)
+	case "research mcxmetals":
+		return runMCXMetals(ctx, rest)
+	case "research silvermfwd":
+		return runSilvermForward(ctx, rest)
 	case "research mcxhmafwd":
 		return runMCXHMAForward(ctx, rest)
 	case "research mcxemafwd":
