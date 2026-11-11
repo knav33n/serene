@@ -12,7 +12,12 @@ rev=$(git rev-parse --short HEAD)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/release"
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags '-s -w' -o "$work/release/serene" ./cmd/serene
+# DuckDB is cgo: its arm64 static libraries come with go.duckdb.org/libduckdb/linux-arm64, the C++
+# toolchain from g++-aarch64-linux-gnu.
+command -v aarch64-linux-gnu-g++ > /dev/null ||
+  { echo "no arm64 cross-compiler: sudo apt install g++-aarch64-linux-gnu" >&2; exit 1; }
+CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ \
+  go build -trimpath -ldflags '-s -w' -o "$work/release/serene" ./cmd/serene
 cp deploy/hearth/host.sh deploy/hearth/serene-*.service deploy/hearth/serene-*.timer "$work/release/"
 echo "$rev" > "$work/release/REVISION"
 tar -C "$work/release" -czf "$work/release.tar.gz" .
