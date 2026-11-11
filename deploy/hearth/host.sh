@@ -10,7 +10,8 @@ region=$(cat /etc/serene/region)
 
 install -m 755 -o serene -g serene serene "$app/serene.new"
 mv "$app/serene.new" "$app/serene"
-install -d -o serene -g serene "$app/data/mcx"
+install -d -o serene -g serene "$app/data/mcx" "$app/configs"
+install -m 644 -o serene -g serene configs/* "$app/configs/"
 
 # Read through $(...): the snap aws's output redirected into a /tmp file comes out empty.
 value=$(/snap/bin/aws --region "$region" ssm get-parameter --name /serene/env --with-decryption \

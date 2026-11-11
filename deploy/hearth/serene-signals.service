@@ -1,0 +1,12 @@
+[Unit]
+Description=serene forward-test signals (goldm_ema_15m) to Slack
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=serene
+Group=serene
+WorkingDirectory=/home/serene/app
+ExecStart=/home/serene/app/serene forward signals --fetch --slack --strategies goldm_ema_15m
+TimeoutStartSec=10min
