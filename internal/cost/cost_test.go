@@ -3,7 +3,7 @@ package cost
 import (
 	"testing"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 const sample = `

@@ -1,6 +1,6 @@
 package regime
 
-import "calm/internal/market"
+import "serene/internal/market"
 
 // Window is a known market fall to review the regime against.
 type Window struct {

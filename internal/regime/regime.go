@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // State is the market regime.

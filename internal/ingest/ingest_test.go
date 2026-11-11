@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/data"
-	"calm/internal/market"
-	"calm/internal/upstox"
+	"serene/internal/data"
+	"serene/internal/market"
+	"serene/internal/upstox"
 )
 
 // Two weekly expiries with lot sizes that differ, like 2024's 25 and today's 65.
@@ -208,7 +208,7 @@ func TestExpiredTokenStopsAndResumes(t *testing.T) {
 	f := &fake{failAfter: 4}
 	c, store, cfg := setup(t, f)
 	err := Run(ctx, cfg, store, c)
-	if err == nil || !strings.Contains(err.Error(), "run calm auth") {
+	if err == nil || !strings.Contains(err.Error(), "run serene auth") {
 		t.Fatalf("got %v", err)
 	}
 	cov, _ := Report(ctx, cfg.Dir, "NIFTY", store)

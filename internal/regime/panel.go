@@ -11,7 +11,7 @@ import (
 	"math"
 	"sort"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Meta is what the catalog knows about an index.

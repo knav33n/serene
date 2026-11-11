@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Rates is one period's charges. Percentages are as quoted, so 0.15 is 0.15%.

@@ -3,7 +3,7 @@ package margin
 import (
 	"testing"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 func opt(strike float64, r market.Right, expiry string) market.Instrument {

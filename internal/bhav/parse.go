@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // ErrSchema means the file's columns changed, so nothing in it can be trusted.

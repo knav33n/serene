@@ -8,12 +8,12 @@ import (
 	"sort"
 	"time"
 
-	"calm/internal/analytics"
-	"calm/internal/cost"
-	"calm/internal/data"
-	"calm/internal/indicator"
-	"calm/internal/market"
-	"calm/internal/swing"
+	"serene/internal/analytics"
+	"serene/internal/cost"
+	"serene/internal/data"
+	"serene/internal/indicator"
+	"serene/internal/market"
+	"serene/internal/swing"
 )
 
 // stopRule is a candidate initial stop. Every rule keeps the trailing stop

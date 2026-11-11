@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // peSince is where P/E percentiles start. NSE moved its index P/E to

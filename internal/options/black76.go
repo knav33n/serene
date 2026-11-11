@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Input describes an option in floats, in rupees and years.

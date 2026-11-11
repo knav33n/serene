@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"calm/internal/adjust"
-	"calm/internal/auth"
-	"calm/internal/bhav"
-	"calm/internal/data"
-	"calm/internal/market"
-	"calm/internal/upstox"
+	"serene/internal/adjust"
+	"serene/internal/auth"
+	"serene/internal/bhav"
+	"serene/internal/data"
+	"serene/internal/market"
+	"serene/internal/upstox"
 )
 
 // equitiesDownload fetches the bhavcopy for a range and returns the years to
@@ -170,7 +170,7 @@ func runEquitiesDaily(ctx context.Context, args []string) error {
 	}
 	if st.Scanned == nil {
 		if len(st.Securities) == 0 {
-			marketLog("no adjustment check has run yet: run calm equities adjust")
+			marketLog("no adjustment check has run yet: run serene equities adjust")
 			return nil
 		}
 		// The first check covered everything up to its run.

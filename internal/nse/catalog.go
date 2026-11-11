@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Index groups, matching the site's categories.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 var (

@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Secret is a value that masks itself when printed or marshalled. Use Reveal

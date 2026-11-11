@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 func bar(key string, t time.Time, c market.Paise) market.Bar {

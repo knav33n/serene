@@ -1,5 +1,5 @@
 # ema_cross_first on the research window, to check that the engine
-# reproduces `calm research emacross` (1DTE, option chart, 1-minute, 3/8,
+# reproduces `serene research emacross` (1DTE, option chart, 1-minute, 3/8,
 # first trade a day: +Rs 12,030 at 30 bps on 70 trades). Rules frozen
 # 2026-11-08; see docs/strategies/ema_cross_first.md. Do not retune on this
 # window.

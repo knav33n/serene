@@ -6,7 +6,7 @@ package oms
 import (
 	"fmt"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // State is where one leg of an order stands.
@@ -132,7 +132,7 @@ func (o *Order) Broken() bool {
 	return filled > 0 && filled < len(o.LegStates)
 }
 
-// MaxClientID is the longest client ID calm sends. Brokers cap order tags
+// MaxClientID is the longest client ID serene sends. Brokers cap order tags
 // (Kite at 20 characters), so IDs stay within the tightest known limit.
 const MaxClientID = 20
 

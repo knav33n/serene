@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 var (

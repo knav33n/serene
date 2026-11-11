@@ -12,13 +12,13 @@ import (
 	"strconv"
 	"time"
 
-	"calm/internal/auth"
-	"calm/internal/market"
+	"serene/internal/auth"
+	"serene/internal/market"
 )
 
 // Fatal errors stop a download, because retrying can't help.
 var (
-	ErrAuth = errors.New("upstox rejected the token: run calm auth")
+	ErrAuth = errors.New("upstox rejected the token: run serene auth")
 	ErrPlan = errors.New("this API needs the Upstox Plus plan")
 	// ErrServer marks a 5xx response.
 	ErrServer = errors.New("upstox server error")

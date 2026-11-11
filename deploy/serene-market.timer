@@ -1,5 +1,5 @@
 [Unit]
-Description=calm market report, 09:00 IST after each weekday close
+Description=serene market report, 09:00 IST after each weekday close
 
 [Timer]
 # NSE's file lands about 23:20 IST, so the morning run has the previous close.

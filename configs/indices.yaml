@@ -1,7 +1,7 @@
 # NSE publishes these in ind_close_all_DDMMYYYY.csv. Groups follow niftyindices.com.
 # breadth: true marks the non-overlapping sectors the regime's breadth check counts,
 # so Bank and Private Bank don't count twice.
-# Aliases are earlier published names. Each must be proved by `calm market check`,
+# Aliases are earlier published names. Each must be proved by `serene market check`,
 # because a wrong one shows up there as a level jump. Case and spacing don't matter.
 indices:
   - name: "Nifty 50"

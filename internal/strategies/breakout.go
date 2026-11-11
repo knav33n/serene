@@ -3,8 +3,8 @@ package strategies
 import (
 	"fmt"
 
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 // breakout tracks the opening range on 1-minute bars, then buys an at-the-money

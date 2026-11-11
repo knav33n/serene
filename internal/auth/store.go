@@ -25,13 +25,13 @@ type Store interface {
 func Load(ctx context.Context, s Store, broker string) (Token, error) {
 	t, err := s.Get(ctx, broker)
 	if errors.Is(err, ErrNoToken) {
-		return Token{}, fmt.Errorf("not logged in to %s: run calm auth", broker)
+		return Token{}, fmt.Errorf("not logged in to %s: run serene auth", broker)
 	}
 	if err != nil {
 		return Token{}, err
 	}
 	if !t.Valid(time.Now()) {
-		return Token{}, fmt.Errorf("%s token expired at %s: run calm auth", broker, t.ExpiresAt.Format(time.RFC3339))
+		return Token{}, fmt.Errorf("%s token expired at %s: run serene auth", broker, t.ExpiresAt.Format(time.RFC3339))
 	}
 	return t, nil
 }
@@ -47,11 +47,11 @@ type PGStore struct {
 // holds the password, so parse errors are never passed on.
 func OpenPostgres(ctx context.Context, databaseURL string, seal *Sealer, schema string) (*PGStore, error) {
 	if databaseURL == "" {
-		return nil, errors.New("CALM_DATABASE_URL is not set")
+		return nil, errors.New("SERENE_DATABASE_URL is not set")
 	}
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		return nil, errors.New("CALM_DATABASE_URL is not a valid Postgres URL")
+		return nil, errors.New("SERENE_DATABASE_URL is not a valid Postgres URL")
 	}
 	cfg.MaxConns = 4
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

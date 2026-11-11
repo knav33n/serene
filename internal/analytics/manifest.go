@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"time"
 
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 // Manifest records what produced a report, so a result can be traced to the

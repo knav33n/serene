@@ -1,0 +1,33 @@
+# The one-time holdout check of pd_break_trail on 2026-05-01 to 2026-11-03,
+# data no pd_break research looked at. Rules frozen 2026-11-09, params
+# identical to configs/pd_break_trail.yaml. It starts on 2026-04-30 only so
+# the first day has a previous day: no trade can open on the run's first day.
+# Pass criteria, set before running: net positive at 30 bps slippage, profit
+# factor at least 1.2, not negative at 2x slippage, and at least 30 trades.
+strategy: pd_break_trail
+underlying: NIFTY
+from: "2026-04-30" # range day only; trades from 2026-05-01
+to: "2026-11-03" # last expiry in the Upstox data
+capital: 100000
+data_dir: data/upstox
+settlement: data/market
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  offset_pct: 1 # strike nearest the previous day's NIFTY low plus 1%
+  strike_step: 50
+  trail_after: 200 # NIFTY points in favour before trailing; no stop before
+  trail: 50 # exit on a NIFTY close this far short of the best close
+  last_entry_minute: 345 # 15:00; no entries from then
+  exit_minute: 360 # 15:15
+  lots: 1
+  band_strikes: 40 # strikes recorded each side of spot, for tomorrow's option high
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12 # only short options use it

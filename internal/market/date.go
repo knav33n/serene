@@ -53,8 +53,13 @@ func (d Date) Weekday() time.Weekday { return d.At(12, 0).Weekday() }
 // MarshalText writes the date as YYYY-MM-DD, in JSON and YAML alike.
 func (d Date) MarshalText() ([]byte, error) { return []byte(d.String()), nil }
 
-// UnmarshalText reads YYYY-MM-DD.
+// UnmarshalText reads YYYY-MM-DD. It reads 0000-00-00, which MarshalText
+// writes for the zero Date, back as the zero Date.
 func (d *Date) UnmarshalText(b []byte) error {
+	if string(b) == (Date{}).String() {
+		*d = Date{}
+		return nil
+	}
 	v, err := ParseDate(string(b))
 	if err != nil {
 		return err

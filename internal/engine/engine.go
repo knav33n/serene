@@ -11,14 +11,14 @@ import (
 	"sort"
 	"time"
 
-	"calm/internal/broker"
-	"calm/internal/cost"
-	"calm/internal/margin"
-	"calm/internal/market"
-	"calm/internal/oms"
-	"calm/internal/portfolio"
-	"calm/internal/risk"
-	"calm/internal/strategy"
+	"serene/internal/broker"
+	"serene/internal/cost"
+	"serene/internal/margin"
+	"serene/internal/market"
+	"serene/internal/oms"
+	"serene/internal/portfolio"
+	"serene/internal/risk"
+	"serene/internal/strategy"
 )
 
 // Config sets up a run.

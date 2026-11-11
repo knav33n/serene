@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/cost"
-	"calm/internal/data"
-	"calm/internal/engine"
-	"calm/internal/margin"
-	"calm/internal/market"
-	"calm/internal/sim"
-	"calm/internal/strategy"
-	"calm/internal/synth"
+	"serene/internal/cost"
+	"serene/internal/data"
+	"serene/internal/engine"
+	"serene/internal/margin"
+	"serene/internal/market"
+	"serene/internal/sim"
+	"serene/internal/strategy"
+	"serene/internal/synth"
 )
 
 func straddleRun(t *testing.T, store *data.Store, from, to market.Date, resume *engine.Resume) (engine.Result, error) {

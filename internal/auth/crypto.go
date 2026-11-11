@@ -16,11 +16,11 @@ type Sealer struct{ aead cipher.AEAD }
 // NewSealer parses a base64 32-byte key.
 func NewSealer(encoded string) (*Sealer, error) {
 	if encoded == "" {
-		return nil, errors.New("CALM_TOKEN_KEY is not set; generate one with: openssl rand -base64 32")
+		return nil, errors.New("SERENE_TOKEN_KEY is not set; generate one with: openssl rand -base64 32")
 	}
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(key) != 32 {
-		return nil, errors.New("CALM_TOKEN_KEY must be 32 bytes of base64; generate one with: openssl rand -base64 32")
+		return nil, errors.New("SERENE_TOKEN_KEY must be 32 bytes of base64; generate one with: openssl rand -base64 32")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -50,7 +50,7 @@ func (s *Sealer) Open(broker string, sealed []byte) (Secret, error) {
 	}
 	plain, err := s.aead.Open(nil, sealed[:n], sealed[n:], []byte(broker))
 	if err != nil {
-		return "", errors.New("stored token can't be decrypted: CALM_TOKEN_KEY may have changed, so log in again")
+		return "", errors.New("stored token can't be decrypted: SERENE_TOKEN_KEY may have changed, so log in again")
 	}
 	return Secret(plain), nil
 }

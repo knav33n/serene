@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"calm/internal/data"
-	"calm/internal/market"
+	"serene/internal/data"
+	"serene/internal/market"
 )
 
 const (

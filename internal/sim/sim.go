@@ -7,9 +7,9 @@ import (
 	"sort"
 	"time"
 
-	"calm/internal/broker"
-	"calm/internal/market"
-	"calm/internal/oms"
+	"serene/internal/broker"
+	"serene/internal/market"
+	"serene/internal/oms"
 )
 
 // Config sets the fill assumptions.

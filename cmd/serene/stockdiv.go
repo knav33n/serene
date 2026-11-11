@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"calm/internal/data"
-	"calm/internal/indicator"
-	"calm/internal/market"
+	"serene/internal/data"
+	"serene/internal/indicator"
+	"serene/internal/market"
 )
 
 // divRule is a long-only bullish RSI divergence on daily bars: a swing low

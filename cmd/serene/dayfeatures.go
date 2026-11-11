@@ -9,10 +9,10 @@ import (
 	"os"
 	"strconv"
 
-	"calm/internal/data"
-	"calm/internal/market"
-	"calm/internal/nse"
-	"calm/internal/regime"
+	"serene/internal/data"
+	"serene/internal/market"
+	"serene/internal/nse"
+	"serene/internal/regime"
 )
 
 // runDayFeatures writes one row per trading day of what was known before or

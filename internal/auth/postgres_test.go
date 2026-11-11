@@ -13,16 +13,16 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Runs only when CALM_TEST_DATABASE_URL is set, in a temporary schema.
+// Runs only when SERENE_TEST_DATABASE_URL is set, in a temporary schema.
 func TestPostgresStore(t *testing.T) {
-	dsn := os.Getenv("CALM_TEST_DATABASE_URL")
+	dsn := os.Getenv("SERENE_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("CALM_TEST_DATABASE_URL is not set")
+		t.Skip("SERENE_TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
 	b := make([]byte, 6)
 	rand.Read(b)
-	schema := "calm_test_" + hex.EncodeToString(b)
+	schema := "serene_test_" + hex.EncodeToString(b)
 	seal, _ := NewSealer(testKey)
 	s, err := OpenPostgres(ctx, dsn, seal, schema)
 	if err != nil {
@@ -67,7 +67,7 @@ func TestPostgresStore(t *testing.T) {
 	if _, err := s.Get(ctx, "zerodha"); err == nil {
 		t.Error("a row moved to another broker still decrypted")
 	}
-	if _, err := Load(ctx, s, "upstox"); err == nil || !strings.Contains(err.Error(), "run calm auth") {
+	if _, err := Load(ctx, s, "upstox"); err == nil || !strings.Contains(err.Error(), "run serene auth") {
 		t.Errorf("load: %v", err)
 	}
 	if err := s.Delete(ctx, "zerodha"); err != nil {
@@ -80,17 +80,17 @@ func TestPostgresStore(t *testing.T) {
 
 func TestPostgresErrorsHideTheURL(t *testing.T) {
 	seal, _ := NewSealer(testKey)
-	_, err := OpenPostgres(context.Background(), "postgres://u:hunter2@bad host:notaport/db", seal, "calm")
+	_, err := OpenPostgres(context.Background(), "postgres://u:hunter2@bad host:notaport/db", seal, "serene")
 	if err == nil || strings.Contains(err.Error(), "hunter2") {
 		t.Errorf("got %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, err = OpenPostgres(ctx, "postgres://u:hunter2@127.0.0.1:1/db", seal, "calm")
+	_, err = OpenPostgres(ctx, "postgres://u:hunter2@127.0.0.1:1/db", seal, "serene")
 	if err == nil || strings.Contains(err.Error(), "hunter2") {
 		t.Errorf("got %v", err)
 	}
-	if _, err := OpenPostgres(ctx, "", seal, "calm"); err == nil {
+	if _, err := OpenPostgres(ctx, "", seal, "serene"); err == nil {
 		t.Error("empty URL accepted")
 	}
 }

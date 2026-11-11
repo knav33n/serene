@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // ErrNotPublished means no file exists for a date: a weekend, a holiday, or
@@ -82,7 +82,7 @@ func (c *Client) once(ctx context.Context, url string) (body []byte, retry bool,
 	if err != nil {
 		return nil, false, err
 	}
-	req.Header.Set("User-Agent", "calm/0.1")
+	req.Header.Set("User-Agent", "serene/0.1")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {

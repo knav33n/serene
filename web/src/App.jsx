@@ -19,7 +19,7 @@ function describe(b) {
     case "expired":
       return { badge: "Expired", text: `The token for ${b.user_id} expired on ${expiry(b.expires_at)}.` };
     case "not_configured":
-      return { badge: "Not configured", text: "Add this broker's API key and secret to .env, then restart calm auth." };
+      return { badge: "Not configured", text: "Add this broker's API key and secret to .env, then restart serene auth." };
     case "error":
       return { badge: "Needs attention", text: "The stored login couldn't be read." };
     default:
@@ -117,7 +117,7 @@ export default function App() {
       fetch("/api/brokers")
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Request failed (${r.status})`))))
         .then(setBrokers)
-        .catch((e) => setProblem(`Can't reach calm auth: ${e.message}. Run it again from the terminal.`));
+        .catch((e) => setProblem(`Can't reach serene auth: ${e.message}. Run it again from the terminal.`));
     refresh();
     // Login happens in another tab, which may finish it through the callback.
     window.addEventListener("focus", refresh);

@@ -5,9 +5,9 @@ import (
 	"math"
 	"time"
 
-	"calm/internal/indicator"
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/indicator"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 // rsiDivergence buys the at-the-money call or put when its own chart, on

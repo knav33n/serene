@@ -11,9 +11,9 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"calm/internal/data"
-	"calm/internal/market"
-	"calm/internal/options"
+	"serene/internal/data"
+	"serene/internal/market"
+	"serene/internal/options"
 )
 
 // Config describes a dataset.

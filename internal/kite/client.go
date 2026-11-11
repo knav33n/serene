@@ -14,12 +14,12 @@ import (
 	"strconv"
 	"time"
 
-	"calm/internal/auth"
-	"calm/internal/market"
+	"serene/internal/auth"
+	"serene/internal/market"
 )
 
 // ErrAuth stops a download, because retrying can't help.
-var ErrAuth = errors.New("kite rejected the token: run calm auth")
+var ErrAuth = errors.New("kite rejected the token: run serene auth")
 
 // Client calls Kite one request at a time, evenly paced. Kite allows 3
 // historical requests a second.

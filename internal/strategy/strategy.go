@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"calm/internal/market"
-	"calm/internal/portfolio"
+	"serene/internal/market"
+	"serene/internal/portfolio"
 )
 
 // Strategy is a trading idea.

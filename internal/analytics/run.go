@@ -6,15 +6,15 @@ import (
 	"runtime"
 	"sync"
 
-	"calm/internal/cost"
-	"calm/internal/data"
-	"calm/internal/engine"
-	"calm/internal/margin"
-	"calm/internal/market"
-	"calm/internal/risk"
-	"calm/internal/sim"
-	"calm/internal/strategies"
-	"calm/internal/strategy"
+	"serene/internal/cost"
+	"serene/internal/data"
+	"serene/internal/engine"
+	"serene/internal/margin"
+	"serene/internal/market"
+	"serene/internal/risk"
+	"serene/internal/sim"
+	"serene/internal/strategies"
+	"serene/internal/strategy"
 )
 
 // Spec is one backtest.

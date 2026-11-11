@@ -1,6 +1,7 @@
 package market
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -184,5 +185,16 @@ func TestDateTextRoundTrip(t *testing.T) {
 	}
 	if err := got.UnmarshalText([]byte("2026-13-01")); err == nil {
 		t.Fatal("bad date accepted")
+	}
+}
+
+func TestZeroDateRoundTrip(t *testing.T) {
+	b, err := json.Marshal(Date{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Date{2020, 1, 1}
+	if err := json.Unmarshal(b, &d); err != nil || !d.IsZero() {
+		t.Fatalf("got %v, %v from %s", d, err, b)
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"sort"
 
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 var registry = map[string]func(underlying string, p strategy.Params) (strategy.Strategy, error){
@@ -17,6 +17,7 @@ var registry = map[string]func(underlying string, p strategy.Params) (strategy.S
 	"lower_high_break": newLowerHighBreak,
 	"rsi_divergence":   newRSIDivergence,
 	"ema_cross_first":  newEMACrossFirst,
+	"pd_break_trail":   newPDBreakTrail,
 }
 
 // Rejected maps each strategy that failed its test to a note saying where

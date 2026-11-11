@@ -1,4 +1,4 @@
-// Command calm researches and trades Indian index options.
+// Command serene researches and trades Indian index options.
 package main
 
 import (
@@ -19,60 +19,63 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"calm/internal/analytics"
-	"calm/internal/auth"
-	"calm/internal/bhav"
-	"calm/internal/cost"
-	"calm/internal/data"
-	"calm/internal/ingest"
-	"calm/internal/margin"
-	"calm/internal/market"
-	"calm/internal/nse"
-	"calm/internal/regime"
-	"calm/internal/risk"
-	"calm/internal/sim"
-	"calm/internal/slack"
-	"calm/internal/strategies"
-	"calm/internal/strategy"
-	"calm/internal/synth"
-	"calm/internal/upstox"
-	"calm/web"
+	"serene/internal/analytics"
+	"serene/internal/auth"
+	"serene/internal/bhav"
+	"serene/internal/cost"
+	"serene/internal/data"
+	"serene/internal/ingest"
+	"serene/internal/margin"
+	"serene/internal/market"
+	"serene/internal/nse"
+	"serene/internal/regime"
+	"serene/internal/risk"
+	"serene/internal/sim"
+	"serene/internal/slack"
+	"serene/internal/strategies"
+	"serene/internal/strategy"
+	"serene/internal/synth"
+	"serene/internal/upstox"
+	"serene/web"
 )
 
-const usage = `calm researches and trades Indian index options.
+const usage = `serene researches and trades Indian index options.
 
-  calm auth                  open the broker login page
-  calm auth status           show each broker's login, never the token
-  calm auth logout BROKER    revoke a token at the broker and delete it
+  serene auth                  open the broker login page
+  serene auth status           show each broker's login, never the token
+  serene auth logout BROKER    revoke a token at the broker and delete it
 
-  calm research synth       --from DATE --to DATE [--underlying NIFTY] [--seed N] [--data DIR]
-  calm research backtest    --config FILE [--unseal] [--holdout FILE]
-  calm research sweep       --config FILE [--unseal] [--holdout FILE]
-  calm research walkforward --config FILE [--unseal] [--holdout FILE]
+  serene research synth       --from DATE --to DATE [--underlying NIFTY] [--seed N] [--data DIR]
+  serene research backtest    --config FILE [--unseal] [--holdout FILE]
+  serene research sweep       --config FILE [--unseal] [--holdout FILE]
+  serene research walkforward --config FILE [--unseal] [--holdout FILE]
 
-  calm research fetch       [--underlying NIFTY] [--from DATE] [--to DATE] [--band-pct 5] [--data DIR]
-  calm research coverage    [--underlying NIFTY] [--data DIR]
-  calm research swings      --date DATE [--underlying NIFTY] [--strike 0] [--expiry DATE] [--k 2] [--min-pullback 10] [--ema 21] [--vwap=true] [--exit-k 1] [--verbose]
-  calm research stops       [--from 2024-12-27] [--to 2026-04-30] [--flat 15:15] [--data DIR] (same entry flags as swings)
-  calm research grid        [--from DATE] [--to DATE] [--split 2025-09-01] [--out reports/grid.csv]
-  calm research emacross    [--from DATE] [--to DATE] [--split 2025-09-01] [--slip-bps 30] [--step 50] [--out reports/emacross.csv] [--trades FILE]
-  calm research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
-  calm research stockdiv    [--from 2005-01-01] [--to 2022-12-31] [--top 200] [--cost-pct 0.24] [--slip-bps 10] [--data DIR]
+  serene research fetch       [--underlying NIFTY] [--from DATE] [--to DATE] [--band-pct 5] [--data DIR]
+  serene research coverage    [--underlying NIFTY] [--data DIR]
+  serene research swings      --date DATE [--underlying NIFTY] [--strike 0] [--expiry DATE] [--k 2] [--min-pullback 10] [--ema 21] [--vwap=true] [--exit-k 1] [--verbose]
+  serene research stops       [--from 2024-12-27] [--to 2026-04-30] [--flat 15:15] [--data DIR] (same entry flags as swings)
+  serene research grid        [--from DATE] [--to DATE] [--split 2025-09-01] [--out reports/grid.csv]
+  serene research emacross    [--from DATE] [--to DATE] [--split 2025-09-01] [--slip-bps 30] [--step 50] [--out reports/emacross.csv] [--trades FILE]
+  serene research eventvol    [--from DATE] [--to DATE] [--split 2025-09-01] [--slip-bps 30] [--step 50] [--out reports/eventvol.csv] [--trades FILE]
+  serene research pdbreak     [--from DATE] [--to DATE] [--split 2025-09-01] [--offset-pct 1] [--slip-bps 30] [--trades FILE]
+  serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
+  serene research stockdiv    [--from 2005-01-01] [--to 2022-12-31] [--top 200] [--cost-pct 0.24] [--slip-bps 10] [--data DIR]
 
-  calm market fetch         [--from DATE] [--to DATE] [--rebuild] [--data DIR] [--catalog FILE]
-  calm market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
-  calm market daily         [--slack] [--data DIR] [--catalog FILE] [--reports DIR]
-  calm market check         [--data DIR] [--catalog FILE]
+  serene market fetch         [--from DATE] [--to DATE] [--rebuild] [--data DIR] [--catalog FILE]
+  serene market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
+  serene market daily         [--slack] [--data DIR] [--catalog FILE] [--reports DIR]
+  serene market check         [--data DIR] [--catalog FILE]
 
-  calm equities fetch       [--from DATE] [--to DATE] [--rebuild] [--data DIR]
-  calm equities check       [--symbols A,B] [--from DATE] [--to DATE] [--data DIR]
-  calm equities adjust      [--symbols A,B] [--recheck] [--data DIR]
-  calm equities daily       [--data DIR]
+  serene equities fetch       [--from DATE] [--to DATE] [--rebuild] [--data DIR]
+  serene equities check       [--symbols A,B] [--from DATE] [--to DATE] [--data DIR]
+  serene equities adjust      [--symbols A,B] [--recheck] [--data DIR]
+  serene equities daily       [--data DIR]
 
-  calm mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
+  serene mcx hourly           [--slack] [--names A,B] [--hour 2026-11-10T21] [--state FILE]
+  serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
 Not built yet:
-  calm prod paper, calm prod live
+  serene prod paper, serene prod live
 `
 
 // config is the YAML run file.
@@ -118,7 +121,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := run(ctx, os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "calm:", err)
+		fmt.Fprintln(os.Stderr, "serene:", err)
 		os.Exit(1)
 	}
 }
@@ -161,6 +164,10 @@ func run(ctx context.Context, args []string) error {
 		return runStockDiv(ctx, rest)
 	case "research emacross":
 		return runEMACross(ctx, rest)
+	case "research pdbreak":
+		return runPDBreak(ctx, rest)
+	case "research eventvol":
+		return runEventVol(ctx, rest)
 	case "research dayfeatures":
 		return runDayFeatures(ctx, rest)
 	case "market fetch":
@@ -179,6 +186,8 @@ func run(ctx context.Context, args []string) error {
 		return runEquitiesAdjust(ctx, rest)
 	case "equities daily":
 		return runEquitiesDaily(ctx, rest)
+	case "mcx hourly":
+		return runMCXHourly(ctx, rest)
 	case "mcx fetch":
 		return runMCXFetch(ctx, rest)
 	case "prod paper", "prod live":
@@ -192,11 +201,11 @@ func openTokens(ctx context.Context) (*auth.PGStore, error) {
 	if err := auth.LoadDotEnv(".env"); err != nil {
 		return nil, err
 	}
-	sealer, err := auth.NewSealer(os.Getenv("CALM_TOKEN_KEY"))
+	sealer, err := auth.NewSealer(os.Getenv("SERENE_TOKEN_KEY"))
 	if err != nil {
 		return nil, err
 	}
-	return auth.OpenPostgres(ctx, os.Getenv("CALM_DATABASE_URL"), sealer, "calm")
+	return auth.OpenPostgres(ctx, os.Getenv("SERENE_DATABASE_URL"), sealer, "serene")
 }
 
 func runFetch(ctx context.Context, args []string) error {
@@ -627,9 +636,9 @@ func runMarketDaily(ctx context.Context, args []string) error {
 	err := marketDaily(ctx, *dir, *catalog, *reports, dm)
 	if err != nil && dm != nil {
 		// A broken job must not look like a quiet day.
-		text := fmt.Sprintf(":x: *calm market daily failed:* %v", err)
+		text := fmt.Sprintf(":x: *serene market daily failed:* %v", err)
 		if perr := dm.client.Post(context.WithoutCancel(ctx), dm.channel, text); perr != nil {
-			fmt.Fprintln(os.Stderr, "calm: slack:", perr)
+			fmt.Fprintln(os.Stderr, "serene: slack:", perr)
 		}
 	}
 	return err
@@ -663,7 +672,7 @@ func marketDaily(ctx context.Context, dir, catalog, reports string, dm *slackDM)
 		return err
 	}
 	if len(dates) == 0 {
-		return errors.New("no index files stored: run calm market fetch")
+		return errors.New("no index files stored: run serene market fetch")
 	}
 	latest := dates[len(dates)-1]
 	sent, err := nse.LoadSent(dir)
@@ -714,7 +723,7 @@ func marketDaily(ctx context.Context, dir, catalog, reports string, dm *slackDM)
 	fmt.Println("report:", path)
 	card, cardErr := renderCard(ctx, path, s)
 	if cardErr != nil {
-		fmt.Fprintln(os.Stderr, "calm:", cardErr)
+		fmt.Fprintln(os.Stderr, "serene:", cardErr)
 	} else {
 		fmt.Println("card:", card)
 	}
@@ -821,7 +830,7 @@ func runMarketCheck(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(rows) == 0 {
-		return errors.New("no index data: run calm market fetch")
+		return errors.New("no index data: run serene market fetch")
 	}
 	p := regime.NewPanel(rows, marketMeta(cat))
 	first, last := p.Dates[0], p.Dates[len(p.Dates)-1]
@@ -1017,7 +1026,7 @@ func runAuth(ctx context.Context, args []string) error {
 		return w.Flush()
 	case "logout":
 		if fs.NArg() != 1 {
-			return errors.New("usage: calm auth logout BROKER")
+			return errors.New("usage: serene auth logout BROKER")
 		}
 		name := fs.Arg(0)
 		known := false
@@ -1047,7 +1056,7 @@ func runAuth(ctx context.Context, args []string) error {
 		fmt.Println("Upstox redirect URI (must exactly match your app):", u.RedirectURI)
 	}
 	fmt.Println("Opening", base)
-	fmt.Println("calm auth stops once every configured broker is logged in, or after 10 idle minutes.")
+	fmt.Println("serene auth stops once every configured broker is logged in, or after 10 idle minutes.")
 	openBrowser(base)
 	return srv.Run(ctx)
 }
@@ -1179,7 +1188,7 @@ func settlementCloses(ctx context.Context, c config, spec analytics.Spec) (map[m
 	return closes, nil
 }
 
-// regimeStates is the calm market regime at each date's close, built from the
+// regimeStates is the serene market regime at each date's close, built from the
 // settlement data directory's index history. A date's state uses only that
 // date and earlier, so a strategy reading the previous close sees nothing
 // from the future.

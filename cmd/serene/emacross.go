@@ -12,12 +12,12 @@ import (
 	"strconv"
 	"time"
 
-	"calm/internal/analytics"
-	"calm/internal/cost"
-	"calm/internal/data"
-	"calm/internal/indicator"
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/analytics"
+	"serene/internal/cost"
+	"serene/internal/data"
+	"serene/internal/indicator"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 // emaCell is one combination in the EMA crossover grid.

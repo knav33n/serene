@@ -17,7 +17,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 const (
@@ -598,16 +598,16 @@ func TestSealer(t *testing.T) {
 
 func TestLoadDotEnv(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
-	os.WriteFile(path, []byte("# comment\n\nCALM_T_A=one\nexport CALM_T_B=\"two words\"\nCALM_T_C='p=q'\nCALM_T_SET=file\n"), 0o600)
-	t.Setenv("CALM_T_SET", "real")
-	for _, k := range []string{"CALM_T_A", "CALM_T_B", "CALM_T_C"} {
+	os.WriteFile(path, []byte("# comment\n\nSERENE_T_A=one\nexport SERENE_T_B=\"two words\"\nSERENE_T_C='p=q'\nSERENE_T_SET=file\n"), 0o600)
+	t.Setenv("SERENE_T_SET", "real")
+	for _, k := range []string{"SERENE_T_A", "SERENE_T_B", "SERENE_T_C"} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
 	}
 	if err := LoadDotEnv(path); err != nil {
 		t.Fatal(err)
 	}
-	for k, want := range map[string]string{"CALM_T_A": "one", "CALM_T_B": "two words", "CALM_T_C": "p=q", "CALM_T_SET": "real"} {
+	for k, want := range map[string]string{"SERENE_T_A": "one", "SERENE_T_B": "two words", "SERENE_T_C": "p=q", "SERENE_T_SET": "real"} {
 		if got := os.Getenv(k); got != want {
 			t.Errorf("%s = %q", k, got)
 		}

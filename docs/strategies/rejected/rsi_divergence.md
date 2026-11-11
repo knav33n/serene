@@ -24,7 +24,7 @@ premium, at most 5 lots, with 30 bps slippage.
 
 Code: `internal/strategies/rsidiv.go`, with the `chart`, `hidden`,
 `trend_ema` and `confirm_ema` modes, and `indicator.RSI`. Stocks:
-`calm research stockdiv` in `cmd/calm/stockdiv.go`.
+`serene research stockdiv` in `cmd/serene/stockdiv.go`.
 
 ## NIFTY options, 2024-12-27 to 2026-04-30
 

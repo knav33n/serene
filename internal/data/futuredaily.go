@@ -10,7 +10,7 @@ import (
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Continuous daily futures sit beside the 1-minute bars:

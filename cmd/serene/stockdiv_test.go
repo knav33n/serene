@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 func divDayBars(ohlc ...[4]float64) []market.Bar {

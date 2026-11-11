@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Limits are the gate's settings. A zero limit is off.

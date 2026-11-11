@@ -24,9 +24,9 @@ import (
 	"sort"
 	"time"
 
-	"calm/internal/data"
-	"calm/internal/kite"
-	"calm/internal/market"
+	"serene/internal/data"
+	"serene/internal/kite"
+	"serene/internal/market"
 )
 
 // Config is one download.

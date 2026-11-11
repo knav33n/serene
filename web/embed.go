@@ -1,4 +1,4 @@
-// Package web embeds the built login page. dist is committed, so building calm
+// Package web embeds the built login page. dist is committed, so building serene
 // doesn't need Node. Rebuild it with npm run build.
 package web
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"calm/internal/data"
-	"calm/internal/market"
+	"serene/internal/data"
+	"serene/internal/market"
 )
 
 func TestExpiryMovesOffHoliday(t *testing.T) {

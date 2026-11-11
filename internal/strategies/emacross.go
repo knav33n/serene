@@ -1,9 +1,9 @@
 package strategies
 
 import (
-	"calm/internal/indicator"
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/indicator"
+	"serene/internal/market"
+	"serene/internal/strategy"
 	"fmt"
 	"math"
 )
@@ -24,7 +24,7 @@ import (
 // Trading days to expiry skip weekends and NSE holidays. A run stops with an
 // error on an expiry past the end of the holiday list, rather than guess.
 //
-// The rules were frozen on 2026-11-08 from `calm research emacross` (1DTE,
+// The rules were frozen on 2026-11-08 from `serene research emacross` (1DTE,
 // option chart, 1-minute, 3/8, first trade a day); see
 // docs/strategies/ema_cross_first.md.
 type emaCrossFirst struct {

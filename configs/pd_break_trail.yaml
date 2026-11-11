@@ -1,0 +1,31 @@
+# pd_break_trail on the research window, to check that the engine reproduces
+# `serene research pdbreak` exit idx200 (+Rs 114,384 at 30 bps on 236 trades).
+# Rules frozen 2026-11-09; see docs/strategies/pd_break_trail.md. Do not
+# retune on this window.
+strategy: pd_break_trail
+underlying: NIFTY
+from: "2024-12-27"
+to: "2026-04-30"
+capital: 100000
+data_dir: data/upstox
+settlement: data/market
+costs_file: configs/costs.yaml
+report_dir: reports
+
+params:
+  offset_pct: 1 # strike nearest the previous day's NIFTY low plus 1%
+  strike_step: 50
+  trail_after: 200 # NIFTY points in favour before trailing; no stop before
+  trail: 50 # exit on a NIFTY close this far short of the best close
+  last_entry_minute: 345 # 15:00; no entries from then
+  exit_minute: 360 # 15:15
+  lots: 1
+  band_strikes: 40 # strikes recorded each side of spot, for tomorrow's option high
+
+sim:
+  slippage_bps: 30
+  min_ticks: 2
+  max_wait_minutes: 3
+
+margin:
+  naked_pct: 12 # only short options use it

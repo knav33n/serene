@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // series builds 1-minute bars from (high, low, close) rupee triples.

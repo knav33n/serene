@@ -1,0 +1,9 @@
+[Unit]
+Description=serene daily NSE stock prices and split/bonus check
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Workspace/serene
+ExecStart=%h/Workspace/serene/serene equities daily

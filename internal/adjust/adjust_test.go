@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 func TestSnap(t *testing.T) {

@@ -1,5 +1,5 @@
 # Parameter sweep and walk-forward on synthetic data. Generate it first:
-#   calm research synth --from 2026-08-03 --to 2026-11-30
+#   serene research synth --from 2026-08-03 --to 2026-11-30
 strategy: short_straddle
 underlying: NIFTY
 from: "2026-08-03"

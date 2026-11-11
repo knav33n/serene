@@ -5,7 +5,7 @@ package swing
 import (
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Pivot is a swing high: a bar whose high is strictly above the k bars on each

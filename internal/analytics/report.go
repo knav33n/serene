@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"calm/internal/engine"
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/engine"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 //go:embed report.html.tmpl

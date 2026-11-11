@@ -11,7 +11,7 @@ import (
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 const equityColumns = `date DATE, symbol VARCHAR, series VARCHAR, isin VARCHAR, open BIGINT, high BIGINT, low BIGINT,
@@ -380,7 +380,7 @@ func (s *Store) EquityPanel(ctx context.Context, from, to market.Date, top int) 
 	}
 	factors := filepath.Join(s.root, "adjust", "factors.parquet")
 	if _, err := os.Stat(factors); err != nil {
-		return nil, fmt.Errorf("no adjustment factors at %s; run calm equities adjust", factors)
+		return nil, fmt.Errorf("no adjustment factors at %s; run serene equities adjust", factors)
 	}
 	rows, err := s.db.QueryContext(ctx, `WITH raw AS (
 			SELECT date, symbol, open, high, low, close, turnover

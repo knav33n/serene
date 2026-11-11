@@ -5,7 +5,7 @@ package indicator
 import (
 	"math"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // EMA returns the n-bar exponential moving average of closes in rupees. It is

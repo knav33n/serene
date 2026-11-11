@@ -6,10 +6,10 @@ import (
 	"sort"
 	"time"
 
-	"calm/internal/indicator"
-	"calm/internal/market"
-	"calm/internal/strategy"
-	"calm/internal/swing"
+	"serene/internal/indicator"
+	"serene/internal/market"
+	"serene/internal/strategy"
+	"serene/internal/swing"
 )
 
 // lowerHighBreak buys the at-the-money call or put when its own chart, on
@@ -31,7 +31,7 @@ import (
 // every order is a market order filled in the next minute.
 //
 // Two optional filters keep it to trending markets. The daily regime (from
-// calm market, as of the previous close) can require Bull or Bear, or Bull for
+// serene market, as of the previous close) can require Bull or Bear, or Bull for
 // calls and Bear for puts. The index's ADX on timeframe bars can require a
 // trend at the signal. The engine delivers option bars before the index bar
 // of the same minute, so with the ADX filter an entry waits for that index

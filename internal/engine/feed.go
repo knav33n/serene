@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"calm/internal/data"
-	"calm/internal/market"
+	"serene/internal/data"
+	"serene/internal/market"
 )
 
 // Batch is every 1-minute candle starting at Time.

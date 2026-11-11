@@ -1,5 +1,5 @@
 # The 5-minute lower-high breakout on real Upstox data, up to the holdout seal.
-# Research (calm research grid) picked the 15-minute hold and the pullback-low
+# Research (serene research grid) picked the 15-minute hold and the pullback-low
 # stop with the trail; this run adds next-minute fills and slippage.
 strategy: lower_high_break
 underlying: NIFTY

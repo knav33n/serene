@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/engine"
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/engine"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 func date(t *testing.T, s string) market.Date {

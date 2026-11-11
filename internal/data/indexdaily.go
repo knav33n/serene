@@ -12,7 +12,7 @@ import (
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 const indexColumns = `date DATE, name VARCHAR, source VARCHAR, open BIGINT, high BIGINT, low BIGINT, close BIGINT,

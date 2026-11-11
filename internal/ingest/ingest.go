@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"calm/internal/data"
-	"calm/internal/market"
-	"calm/internal/upstox"
+	"serene/internal/data"
+	"serene/internal/market"
+	"serene/internal/upstox"
 )
 
 // IndexKeys maps supported underlyings to Upstox instrument keys.

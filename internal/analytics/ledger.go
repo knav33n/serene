@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 // TrialRecord is one entry in a data directory's trial ledger. Every research

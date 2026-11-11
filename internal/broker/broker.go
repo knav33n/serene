@@ -9,8 +9,8 @@ import (
 	"errors"
 	"time"
 
-	"calm/internal/market"
-	"calm/internal/oms"
+	"serene/internal/market"
+	"serene/internal/oms"
 )
 
 // ErrNotOpen means a cancel named an order that is not open: unknown, or
@@ -40,7 +40,7 @@ type Position struct {
 }
 
 // Account is what a broker says it holds, which reconciliation compares with
-// calm's own books before trading.
+// serene's own books before trading.
 type Account interface {
 	// Positions returns non-zero net positions.
 	Positions(ctx context.Context) ([]Position, error)

@@ -10,8 +10,8 @@ import (
 	"slices"
 	"sort"
 
-	"calm/internal/data"
-	"calm/internal/market"
+	"serene/internal/data"
+	"serene/internal/market"
 )
 
 // UpstoxFrom is the first date Upstox has daily candles for.

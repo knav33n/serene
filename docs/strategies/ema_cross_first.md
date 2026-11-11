@@ -27,7 +27,7 @@ Configs:
 
 ## Where it came from
 
-The rules came from `calm research emacross` on 2024-12-27 to 2026-04-30:
+The rules came from `serene research emacross` on 2024-12-27 to 2026-04-30:
 1DTE, option chart, 1-minute bars, 3/8, first trade a day. After slippage it
 made +₹12,030 on 70 trades, with a profit factor of 1.41 in Jan–Aug 2025 and
 1.44 in Sep 2025 – Apr 2026.
@@ -52,10 +52,10 @@ repeatedly and stopping when it looks good is another way of fitting to the data
 
 ## How to run it
 
-1. Fetch new expiries: `./calm research fetch`.
+1. Fetch new expiries: `./serene research fetch`.
 2. Set `to` in `configs/ema_cross_first_forward.yaml` to the last fetched
    expiry. That is the only line allowed to change.
-3. Run `./calm research backtest --config configs/ema_cross_first_forward.yaml --unseal`.
+3. Run `./serene research backtest --config configs/ema_cross_first_forward.yaml --unseal`.
 
 The date is past the 2026-05-01 seal, so the run needs `--unseal`, and the
 trial ledger records it.

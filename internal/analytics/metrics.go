@@ -5,8 +5,8 @@ import (
 	"math"
 	"sort"
 
-	"calm/internal/engine"
-	"calm/internal/market"
+	"serene/internal/engine"
+	"serene/internal/market"
 )
 
 // Metrics summarises a run. Trade statistics group legs by tag, so a

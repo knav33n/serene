@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/broker/brokertest"
-	"calm/internal/market"
+	"serene/internal/broker/brokertest"
+	"serene/internal/market"
 )
 
 func TestBrokerContract(t *testing.T) {

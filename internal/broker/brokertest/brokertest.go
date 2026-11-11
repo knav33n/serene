@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/broker"
-	"calm/internal/market"
-	"calm/internal/oms"
+	"serene/internal/broker"
+	"serene/internal/market"
+	"serene/internal/oms"
 )
 
 // Venue is a broker under test and a way to move its market.

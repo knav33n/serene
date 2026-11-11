@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 // shortStraddle sells the at-the-money call and put of the nearest expiry at a

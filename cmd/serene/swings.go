@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"calm/internal/indicator"
-	"calm/internal/ingest"
-	"calm/internal/market"
-	"calm/internal/swing"
-	"calm/internal/upstox"
+	"serene/internal/indicator"
+	"serene/internal/ingest"
+	"serene/internal/market"
+	"serene/internal/swing"
+	"serene/internal/upstox"
 )
 
 // runSwings fetches one day of an at-the-money call and put from Upstox and

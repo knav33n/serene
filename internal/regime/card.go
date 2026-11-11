@@ -220,7 +220,7 @@ func RenderPNG(ctx context.Context, htmlPath, pngPath string, height int) error 
 	if err != nil {
 		return err
 	}
-	profile, err := os.MkdirTemp("", "calm-card-")
+	profile, err := os.MkdirTemp("", "serene-card-")
 	if err != nil {
 		return err
 	}

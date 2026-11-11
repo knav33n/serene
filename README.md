@@ -1,4 +1,4 @@
-# calm
+# serene
 
 Research and trade Indian index options in Go. Strategies are written once and
 run unchanged in backtests, and later on paper and live.
@@ -12,11 +12,11 @@ only return an error. See `docs/roadmap.md`.
 Requires Go 1.27 and a C compiler, because the DuckDB driver uses CGO.
 
 ```sh
-go build -o calm ./cmd/calm
-./calm research synth --from 2026-08-03 --to 2026-11-30
-./calm research backtest --config configs/run.yaml      # writes reports/*.html
-./calm research sweep --config configs/sweep.yaml
-./calm research walkforward --config configs/sweep.yaml
+go build -o serene ./cmd/serene
+./serene research synth --from 2026-08-03 --to 2026-11-30
+./serene research backtest --config configs/run.yaml      # writes reports/*.html
+./serene research sweep --config configs/sweep.yaml
+./serene research walkforward --config configs/sweep.yaml
 ```
 
 Synthetic data is a fairly priced random walk, so no strategy has an edge on
@@ -26,21 +26,21 @@ it. Use it to test the system, never to judge an idea.
 
 Upstox and Zerodha tokens expire every morning (03:30 and 06:00 IST), so log in
 once a day. Tokens can place real orders, so they're encrypted with
-`CALM_TOKEN_KEY` before being stored in Postgres, and never shown in the page,
+`SERENE_TOKEN_KEY` before being stored in Postgres, and never shown in the page,
 terminal or logs.
 
 Setup:
 
 1. Copy `.env.example` to `.env` and fill it in.
 2. Register a redirect URL with each broker's app. With these, a login finishes
-   by itself while `calm auth` is running:
+   by itself while `serene auth` is running:
    - `http://127.0.0.1:8080/callback/upstox`
    - `http://127.0.0.1:8080/callback/zerodha`
 
    You can use another URL if you can copy the token from it. This project's
    Upstox app uses `https://httpbin.org/get`. For Upstox, set
    `UPSTOX_REDIRECT_URI` to exactly the registered value, because it's sent with
-   every login. A mismatch gives `UDAPI100068`, and `calm auth` prints the value
+   every login. A mismatch gives `UDAPI100068`, and `serene auth` prints the value
    it's using so you can compare.
 
    Login codes pass through httpbin, a third party, so switch to the local URL
@@ -49,9 +49,9 @@ Setup:
 Daily use:
 
 ```sh
-./calm auth                  # opens the login page
-./calm auth status           # shows each login, never the token
-./calm auth logout upstox    # revokes the token at the broker and deletes it
+./serene auth                  # opens the login page
+./serene auth status           # shows each login, never the token
+./serene auth logout upstox    # revokes the token at the broker and deletes it
 ```
 
 On the page, **Log in** shows the broker's URL and a box. Open the URL, log in,
@@ -64,7 +64,7 @@ check `Token.ValidThrough` so a token can't expire during the session.
 
 The page is in `web/`. `web/dist` is committed, so `go build` doesn't need Node.
 After changing it, run `npm run build` in `web/`. To run the Postgres tests, set
-`CALM_TEST_DATABASE_URL`; they use a temporary schema.
+`SERENE_TEST_DATABASE_URL`; they use a temporary schema.
 
 ## Real data
 
@@ -72,12 +72,12 @@ Downloads expired NIFTY options from Upstox into `data/upstox`. It needs the
 Upstox Plus plan and a login from today.
 
 ```sh
-./calm research fetch       # safe to rerun: finished expiries are skipped
-./calm research coverage    # shows what's missing
+./serene research fetch       # safe to rerun: finished expiries are skipped
+./serene research coverage    # shows what's missing
 ```
 
 A full download takes hours. If the token expires or the job stops, run
-`calm auth`, then the same command, and it carries on. To backtest on this data,
+`serene auth`, then the same command, and it carries on. To backtest on this data,
 set `data_dir: data/upstox` and `settlement: data/market` in your config, so
 expiries settle at NSE's official close.
 
@@ -93,19 +93,19 @@ Stores every Nifty index from NSE's daily file and reports which sectors are
 moving and what regime the market is in. It needs no broker login.
 
 ```sh
-./calm market fetch               # backfills from 2012, safe to rerun
-./calm market report              # writes reports/market/DATE.html
-./calm market check               # data integrity and regime history
-./calm market daily --slack       # fetch, report and post once per close
+./serene market fetch               # backfills from 2012, safe to rerun
+./serene market report              # writes reports/market/DATE.html
+./serene market check               # data integrity and regime history
+./serene market daily --slack       # fetch, report and post once per close
 ```
 
 NSE publishes the file about 23:20 IST. To run it at 09:00 IST on Tuesday to
 Saturday, and at next boot if the machine was off:
 
 ```sh
-cp deploy/calm-market.* ~/.config/systemd/user/
+cp deploy/serene-market.* ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now calm-market.timer
+systemctl --user enable --now serene-market.timer
 ```
 
 Slack needs `SLACK_TOKEN` and `SLACK_CHANNEL` in `.env`, and the app needs
@@ -129,10 +129,10 @@ Stores NSE's daily bhavcopy: open, high, low, close, volume and turnover for eve
 security traded, from the first session on 1994-11-03. It needs no broker login.
 
 ```sh
-./calm equities fetch             # backfills from 1994, safe to rerun
-./calm equities adjust            # finds splits and bonuses, needs an Upstox login
-./calm equities check --adjusted  # compares with Upstox daily candles
-./calm equities daily             # fetch, then confirm any new splits or bonuses
+./serene equities fetch             # backfills from 1994, safe to rerun
+./serene equities adjust            # finds splits and bonuses, needs an Upstox login
+./serene equities check --adjusted  # compares with Upstox daily candles
+./serene equities daily             # fetch, then confirm any new splits or bonuses
 ```
 
 Raw zips are kept in `data/equities/raw/` and rebuilt into
@@ -164,13 +164,13 @@ price alone can fail when the two ratios lie within 0.3%.
 
 The daily job marks stocks that open and close below 0.92 or above 1.9 times
 their last close, or change ISIN, and checks them against Upstox. Upstox tokens
-expire at 03:30 IST, so it confirms them only on days you have run `calm auth`;
+expire at 03:30 IST, so it confirms them only on days you have run `serene auth`;
 until then they wait. To run it at 19:30 IST on weekdays:
 
 ```sh
-cp deploy/calm-equities.* ~/.config/systemd/user/
+cp deploy/serene-equities.* ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now calm-equities.timer
+systemctl --user enable --now serene-equities.timer
 ```
 
 ## Writing a strategy

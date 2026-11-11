@@ -37,7 +37,7 @@ const (
 	LimitOrder  OrderKind = "limit"
 )
 
-// Product is how long a position may be held. The names are calm's own; each
+// Product is how long a position may be held. The names are serene's own; each
 // broker adapter maps them to its codes (Kite NRML and MIS, for example).
 type Product string
 
@@ -50,7 +50,7 @@ const (
 // the order belongs to, so legs can be analysed as one structure.
 type Order struct {
 	ID int64
-	// ClientID is calm's own identifier, sent to the broker as the order tag so
+	// ClientID is serene's own identifier, sent to the broker as the order tag so
 	// an order can be found again after a timeout or a restart.
 	ClientID string
 	Tag      string

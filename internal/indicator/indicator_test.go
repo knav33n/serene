@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 func bar(day, minute int, h, l, c float64, v int64) market.Bar {

@@ -3,8 +3,8 @@ package strategies
 import (
 	"testing"
 
-	"calm/internal/market"
-	"calm/internal/strategy"
+	"serene/internal/market"
+	"serene/internal/strategy"
 )
 
 func TestTradingDaysTo(t *testing.T) {

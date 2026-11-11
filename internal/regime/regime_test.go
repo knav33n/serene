@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // build makes a panel of n weekday-ish dates from price functions.

@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"calm/internal/data"
-	"calm/internal/market"
+	"serene/internal/data"
+	"serene/internal/market"
 )
 
 // ExpiryCoverage is one expiry's download result.

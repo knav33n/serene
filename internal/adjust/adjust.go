@@ -15,7 +15,7 @@ import (
 	"slices"
 	"sort"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Kinds of event.

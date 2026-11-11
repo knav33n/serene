@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/cost"
-	"calm/internal/data"
-	"calm/internal/engine"
-	"calm/internal/margin"
-	"calm/internal/market"
-	"calm/internal/portfolio"
-	"calm/internal/sim"
-	"calm/internal/strategy"
-	"calm/internal/synth"
+	"serene/internal/cost"
+	"serene/internal/data"
+	"serene/internal/engine"
+	"serene/internal/margin"
+	"serene/internal/market"
+	"serene/internal/portfolio"
+	"serene/internal/sim"
+	"serene/internal/strategy"
+	"serene/internal/synth"
 )
 
 func TestMeasureByHand(t *testing.T) {

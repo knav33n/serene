@@ -9,18 +9,18 @@ NIFTY and BANKNIFTY options; Indian equities and MCX commodities follow.
 | 1 | Domain types, Parquet store, resampler | Done |
 | 2 | Engine, simulator, portfolio, settlement | Done |
 | 3 | Costs, margin, Greeks, metrics, report | Done |
-| - | `calm auth`: broker login, tokens in Postgres | Done, used with real Upstox and Zerodha |
+| - | `serene auth`: broker login, tokens in Postgres | Done, used with real Upstox and Zerodha |
 | 4 | Upstox ingest and coverage report | Built for NIFTY |
 | 5 | Sweeps, walk-forward, example strategies | Done |
-| - | `calm market`: daily index store, sector report, regime, Slack | Done |
+| - | `serene market`: daily index store, sector report, regime, Slack | Done |
 | - | Seams for paper and live: holdout, decision log, order lifecycle, risk gate, resume | Done |
 | 6 | Paper mode: Kite ticker, live fills, journal, tick recording | Not started |
 | 7 | Live mode: order adapters, risk layer, reconciliation | Not started |
 
 ## Step 4: Upstox ingest
 
-- `calm research fetch`: resumable, repeatable, paced to 1.1 requests per second.
-- `calm research coverage`: reports what's missing by expiry and contract.
+- `serene research fetch`: resumable, repeatable, paced to 1.1 requests per second.
+- `serene research coverage`: reports what's missing by expiry and contract.
 - Lot sizes come from each contract, never hardcoded.
 - Scope so far: NIFTY only, 1-minute bars, strikes within 5% of the index's range
   in the 30 days before expiry. BANKNIFTY needs its Upstox key adding.
@@ -36,7 +36,7 @@ Findings from real responses, some of which contradict the docs:
   limited to one month per request.
 - The 2024-12-26 monthly expiry lists 281 contracts, but Upstox returned no
   candles for the four checked over any window, and none in the full download.
-  Its manifest is kept, so a fetch won't ask again. `calm research coverage`
+  Its manifest is kept, so a fetch won't ask again. `serene research coverage`
   lists it under empty expiries.
 - Expired-candle lists don't include the unexpired series, so the current week's
   contracts arrive after they expire.
@@ -69,7 +69,7 @@ and 136 on Zerodha, plus P/E, P/B and volume, and no login. Findings from the fi
 - niftyindices.com answers a missing file with 200 and an HTML page, so the NSE
   archive, which sends a real 404, is tried first.
 - Names changed many times; `configs/indices.yaml` holds the aliases, and
-  `calm market check` proves them. `Nifty Full Midcap 100` is a different series
+  `serene market check` proves them. `Nifty Full Midcap 100` is a different series
   from `NIFTY Midcap 100`.
 - The 2016-07-07 and 2023-04-12 files hold back-calculated rows for indices launched
   years later, so a gap over 10 days restarts a series.
@@ -137,7 +137,7 @@ Decided:
   `Account` refuses to start.
 - Recorded ticks live apart from `data/upstox` and `data/market` and are never
   merged into them; replays are marked as such.
-- `calm check` before the open and after the close: token valid through the
+- `serene check` before the open and after the close: token valid through the
   close, trading day, data fresh, journal lock free, `.env` mode 600, disk, and
   that the run started. It reports to Slack and never acts.
 
@@ -160,7 +160,7 @@ Kite order adapter, then Upstox. Live needs both an explicit flag and config.
   closed only on a confirmed fill; if the broker API is down, halt and alert.
 - A structure that fills some legs and not others (`oms.Order.Broken`) is
   flattened and alerted. So is a position whose protective stop can't be placed.
-- Each adapter maps `market.Product` and broker statuses to calm's own; an
+- Each adapter maps `market.Product` and broker statuses to serene's own; an
   unrecognised status becomes `Unknown`, never `Filled`. Check each broker's tag
   limit, stop types for options, and any idempotency support before building.
 
@@ -173,6 +173,6 @@ Constraints:
   once a week, and changing it invalidates tokens.
 - `192.168.31.98` is a private address, so a trading machine outside that network
   needs a VPN or its own database.
-- `dbadmin` is an admin login. Use a role limited to the `calm` schema before
+- `dbadmin` is an admin login. Use a role limited to the `serene` schema before
   going live.
 - On a headless server, log in with `ssh -L 8080:127.0.0.1:8080 server`.

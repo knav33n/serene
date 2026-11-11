@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/cost"
-	"calm/internal/margin"
-	"calm/internal/market"
-	"calm/internal/risk"
-	"calm/internal/sim"
-	"calm/internal/strategy"
+	"serene/internal/cost"
+	"serene/internal/margin"
+	"serene/internal/market"
+	"serene/internal/risk"
+	"serene/internal/sim"
+	"serene/internal/strategy"
 )
 
 var (

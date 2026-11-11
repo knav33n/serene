@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 func date(t *testing.T, s string) market.Date {

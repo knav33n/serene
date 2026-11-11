@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 func serve(t *testing.T, h http.HandlerFunc) *Client {

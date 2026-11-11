@@ -23,7 +23,7 @@ import (
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 
-	"calm/internal/market"
+	"serene/internal/market"
 )
 
 // Store is a Parquet market data store.

@@ -1,5 +1,5 @@
 [Unit]
-Description=calm stock prices, 19:30 IST after each weekday close
+Description=serene stock prices, 19:30 IST after each weekday close
 
 [Timer]
 # NSE's bhavcopy lands by about 18:00 IST. An Upstox login that day lets the
