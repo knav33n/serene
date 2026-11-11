@@ -27,7 +27,8 @@ type EMAConfig struct {
 	Spec       Spec
 	Frame      time.Duration
 	Fast, Slow int
-	LongOnly   bool // flat, not short, while fast is under slow
+	LongOnly   bool    // flat, not short, while fast is under slow
+	MinGap     float64 // percent of slow the EMAs must part by to flip; inside it the side is kept
 	Slip       int64
 	Costs      *cost.Schedule
 	From, To   market.Date
@@ -38,6 +39,8 @@ type EMAConfig struct {
 // long when fast > slow and short (or flat if LongOnly) when under; a change
 // fills at the next minute's open. Positions hold overnight and exit at a
 // roll; the new contract is entered on its first minute in the wanted side.
+// With MinGap, a side is wanted only once fast is more than MinGap percent of
+// slow above (or below) it; a thinner cross keeps the side already wanted.
 // Trade.R is the move as a percent of the entry price.
 func EMABacktest(ed *EMAData, cfg EMAConfig) ([]Trade, error) {
 	sr := ed.sr
@@ -100,12 +103,13 @@ func EMABacktest(ed *EMAData, cfg EMAConfig) ([]Trade, error) {
 			if !ok || math.IsNaN(sk[i]) {
 				continue
 			}
+			band := sk[i] * cfg.MinGap / 100
 			switch {
-			case fk[i] > sk[i]:
+			case fk[i]-sk[i] > band:
 				want = market.Buy
-			case fk[i] < sk[i] && cfg.LongOnly:
+			case sk[i]-fk[i] > band && cfg.LongOnly:
 				want = 0
-			case fk[i] < sk[i]:
+			case sk[i]-fk[i] > band:
 				want = market.Sell
 			}
 		}

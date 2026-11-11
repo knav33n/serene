@@ -59,6 +59,8 @@ const usage = `serene researches and trades Indian index options.
   serene research eventvol    [--from DATE] [--to DATE] [--split 2025-09-01] [--slip-bps 30] [--step 50] [--out reports/eventvol.csv] [--trades FILE]
   serene research mcxcloud    [--names A,B] [--n 5] [--exit swing30|vote30|cloud30|ha30|2R] [--nine-k 1] [--table NAME] [--grid] [--trades FILE]
   serene research mcxema      [--name GOLDM] [--from DATE] [--to DATE] [--split DATE] [--slip-ticks 1]
+  serene research mcxemagap   [--name GOLDM] [--from DATE] [--to DATE] [--split DATE]   (EMA crosses with a minimum gap)
+  serene research mcxemaexit  [--frame 15] [--fast 13] [--slow 34] [--from DATE] [--to DATE]   (EMA cross exit rules)
   serene research mcxemafwd   [--to DATE] [--judge] [--replay]   (frozen GOLDM 15m 13/34, sessions from 2026-11-11)
   serene research mcxdow      [--names A,B] [--from DATE] [--to DATE] [--frame 1h] [--lookback 720h] [--multiple 2.5] [--slip-ticks 1] [--trades FILE]
   serene research pdbreak     [--from DATE] [--to DATE] [--split 2025-09-01] [--offset-pct 1] [--slip-bps 30] [--trades FILE]
@@ -176,6 +178,10 @@ func run(ctx context.Context, args []string) error {
 		return runMCXEMA(ctx, rest)
 	case "research mcxemafwd":
 		return runMCXEMAForward(ctx, rest)
+	case "research mcxemagap":
+		return runMCXEMAGap(ctx, rest)
+	case "research mcxemaexit":
+		return runMCXEMAExit(ctx, rest)
 	case "research mcxdow":
 		return runMCXDow(ctx, rest)
 	case "research eventvol":
