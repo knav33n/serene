@@ -74,7 +74,6 @@ const usage = `serene researches and trades Indian index options.
   serene equities adjust      [--symbols A,B] [--recheck] [--data DIR]
   serene equities daily       [--data DIR]
 
-  serene mcx hourly           [--slack] [--names A,B] [--hour 2026-11-10T21] [--state FILE]
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
 Not built yet:
@@ -195,8 +194,6 @@ func run(ctx context.Context, args []string) error {
 		return runEquitiesAdjust(ctx, rest)
 	case "equities daily":
 		return runEquitiesDaily(ctx, rest)
-	case "mcx hourly":
-		return runMCXHourly(ctx, rest)
 	case "mcx fetch":
 		return runMCXFetch(ctx, rest)
 	case "prod paper", "prod live":

@@ -18,7 +18,10 @@ command -v aarch64-linux-gnu-g++ > /dev/null ||
   { echo "no arm64 cross-compiler: sudo apt install g++-aarch64-linux-gnu" >&2; exit 1; }
 CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ \
   go build -trimpath -ldflags '-s -w' -o "$work/release/serene" ./cmd/serene
-cp deploy/hearth/host.sh deploy/hearth/serene-*.service deploy/hearth/serene-*.timer "$work/release/"
+cp deploy/hearth/host.sh "$work/release/"
+shopt -s nullglob # no units: host.sh removes the installed ones
+for u in deploy/hearth/serene-*.service deploy/hearth/serene-*.timer; do cp "$u" "$work/release/"; done
+shopt -u nullglob
 echo "$rev" > "$work/release/REVISION"
 tar -C "$work/release" -czf "$work/release.tar.gz" .
 

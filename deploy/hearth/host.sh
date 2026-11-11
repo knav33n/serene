@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Runs on hearth as root (deploy.sh sends it over Systems Manager) from the unpacked release:
 # installs the binary, writes .env from /serene/env, lets serene read project_calm's broker
-# logins, and installs and starts the timers. The iac serene stack's setup.sh made the user,
-# /home/serene/app and the database.
+# logins, and installs and starts the timers it ships, removing any it no longer does. The iac
+# serene stack's setup.sh made the user, /home/serene/app and the database.
 set -euo pipefail
 cd "$(dirname "$0")"
 app=/home/serene/app
@@ -26,6 +26,15 @@ grant usage on schema trading to serene;
 grant select on trading.broker_sessions to serene;
 SQL
 
+shopt -s nullglob
+# Units dropped from the release are stopped and removed.
+for path in /etc/systemd/system/serene-*.service /etc/systemd/system/serene-*.timer; do
+  u=$(basename "$path")
+  [[ -f $u ]] && continue
+  systemctl disable --now -q "$u" || true
+  rm -f "$path"
+  echo "removed $u"
+done
 for u in serene-*.service serene-*.timer; do install -m 644 "$u" /etc/systemd/system/; done
 systemctl daemon-reload
 for t in serene-*.timer; do systemctl enable --now -q "$t"; done
