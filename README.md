@@ -173,6 +173,25 @@ systemctl --user daemon-reload
 systemctl --user enable --now serene-equities.timer
 ```
 
+## MCX hourly pulse (hearth)
+
+`serene mcx hourly --slack` posts each MCX commodity's 15-minute Dow structure
+to Slack after every hour of the session. It runs in production on hearth, the
+shared AWS host from the iac repo, as the system timer `serene-mcx-hourly`
+under the `serene` user. It copies Kite tokens from hearth's own project_calm,
+so log in to Kite there each morning. Don't also install `deploy/serene-mcx-hourly.*`
+locally: each machine records the hours it has posted, so both would post.
+
+```sh
+(cd ../iac && iac serene up)          # once: bucket, policy, serene user and database
+cp deploy/hearth/server.env.example deploy/hearth/server.env   # fill it in
+deploy/hearth/env.sh                  # .env -> SSM /serene/env
+deploy/hearth/deploy.sh               # HEAD -> hearth, (re)starts the timer
+```
+
+`deploy.sh` ships the committed HEAD as an arm64 build. On the host, logs are
+`journalctl -u serene-mcx-hourly`.
+
 ## Writing a strategy
 
 Implement `strategy.Strategy` in `internal/strategies`, and add it to the

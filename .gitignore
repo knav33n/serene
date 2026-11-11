@@ -6,3 +6,5 @@
 secrets*
 node_modules/
 !.env.example
+# hearth .env (deploy/hearth/env.sh uploads it)
+/deploy/hearth/server.env
