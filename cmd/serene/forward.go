@@ -58,7 +58,7 @@ func (s fwdSignal) text() string {
 // is how hearth runs it each minute of the MCX session.
 func runForwardSignals(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("forward signals", flag.ContinueOnError)
-	useSlack := fs.Bool("slack", false, "post new signals to SLACK_TRADES_CHANNEL")
+	useSlack := fs.Bool("slack", false, "post new signals to SLACK_TRADES_CHANNEL, SILVERM ones to SLACK_SILVERM_CHANNEL if set")
 	fetch := fs.Bool("fetch", false, "fetch the MCX strategies' minute bars from Kite first")
 	only := fs.String("strategies", "goldm_ema_15m", "comma-separated: goldm_ema_15m, goldm_hma_1h, silverm_ema_15m, silverm_hma_1h, ema_cross_first")
 	sentPath := fs.String("sent", "data/forward_sent.json", "signals already posted")
@@ -71,13 +71,26 @@ func runForwardSignals(ctx context.Context, args []string) error {
 	}
 	var client *slack.Client
 	var channel string
+	route := func(string) string { return channel }
 	if *useSlack {
 		var err error
 		if client, channel, err = openSlackChannel(ctx, "SLACK_TRADES_CHANNEL"); err != nil {
 			return err
 		}
+		if target := os.Getenv("SLACK_SILVERM_CHANNEL"); target != "" {
+			silverm, err := client.Resolve(ctx, target)
+			if err != nil {
+				return err
+			}
+			route = func(strat string) string {
+				if mcxForwardUnderlying(strat) == smName {
+					return silverm
+				}
+				return channel
+			}
+		}
 	}
-	err := forwardSignals(ctx, client, channel, *fetch, strings.Split(*only, ","), *sentPath, *niftyCfg, *mcxDir, *mcxCosts)
+	err := forwardSignals(ctx, client, route, *fetch, strings.Split(*only, ","), *sentPath, *niftyCfg, *mcxDir, *mcxCosts)
 	alertOnce(ctx, client, channel, *alertPath, "serene forward signals", err)
 	return err
 }
@@ -109,7 +122,9 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func forwardSignals(ctx context.Context, client *slack.Client, channel string, fetch bool, only []string,
+// route is the Slack channel for a strategy's signals. Failure alerts go to
+// SLACK_TRADES_CHANNEL only.
+func forwardSignals(ctx context.Context, client *slack.Client, route func(strategy string) string, fetch bool, only []string,
 	sentPath, niftyCfg, mcxDir, mcxCosts string) error {
 	var all []fwdSignal
 	if fetch {
@@ -166,23 +181,36 @@ func forwardSignals(ctx context.Context, client *slack.Client, channel string, f
 		fmt.Printf("%d new signal(s); --slack posts them\n", len(fresh))
 		return nil
 	}
+	// Each channel gets its own messages, oldest first.
+	var channels []string
+	byChannel := map[string][]fwdSignal{}
+	for _, s := range fresh {
+		c := route(s.Strategy)
+		if _, ok := byChannel[c]; !ok {
+			channels = append(channels, c)
+		}
+		byChannel[c] = append(byChannel[c], s)
+	}
 	// Slack's message limit is about 40k characters; batch well under it.
 	const perMessage = 40
-	for i := 0; i < len(fresh); i += perMessage {
-		batch := fresh[i:min(i+perMessage, len(fresh))]
-		lines := make([]string, len(batch))
-		for j, s := range batch {
-			lines[j] = s.text()
-		}
-		if err := client.Post(ctx, channel, strings.Join(lines, "\n")); err != nil {
-			return err
-		}
-		for _, s := range batch {
-			sent[s.id()] = true
-		}
-		// Saved after each message, so a failure part-way doesn't repost.
-		if err := saveSent(sentPath, sent); err != nil {
-			return err
+	for _, c := range channels {
+		sigs := byChannel[c]
+		for i := 0; i < len(sigs); i += perMessage {
+			batch := sigs[i:min(i+perMessage, len(sigs))]
+			lines := make([]string, len(batch))
+			for j, s := range batch {
+				lines[j] = s.text()
+			}
+			if err := client.Post(ctx, c, strings.Join(lines, "\n")); err != nil {
+				return err
+			}
+			for _, s := range batch {
+				sent[s.id()] = true
+			}
+			// Saved after each message, so a failure part-way doesn't repost.
+			if err := saveSent(sentPath, sent); err != nil {
+				return err
+			}
 		}
 	}
 	fmt.Printf("posted %d signal(s)\n", len(fresh))
