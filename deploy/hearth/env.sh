@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 export AWS_PROFILE=${AWS_PROFILE:-iac} AWS_REGION=${AWS_REGION:-ap-south-1}
 
 [[ -f server.env ]] || { echo "no deploy/hearth/server.env: copy server.env.example and fill it in" >&2; exit 1; }
-for k in SERENE_DATABASE_URL CALM_DATABASE_URL SERENE_TOKEN_KEY ZERODHA_API_KEY SLACK_TOKEN SLACK_CHANNEL SLACK_TRADES_CHANNEL SLACK_SILVERM_CHANNEL SLACK_PAPER_CHANNEL; do
+for k in SERENE_DATABASE_URL CALM_DATABASE_URL SERENE_TOKEN_KEY ZERODHA_API_KEY SLACK_TOKEN SLACK_CHANNEL SLACK_TRADES_CHANNEL SLACK_SILVERM_CHANNEL SLACK_PAPER_CHANNEL SLACK_PDL_CHANNEL; do
   grep -qE "^$k=.+" server.env || { echo "server.env: $k is empty" >&2; exit 1; }
 done
 aws ssm put-parameter --name /serene/env --type SecureString --overwrite \

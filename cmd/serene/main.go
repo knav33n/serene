@@ -68,6 +68,7 @@ const usage = `serene researches and trades Indian index options.
   serene research silvermfwd  [--strategy silverm_ema_15m|silverm_hma_1h] [--to DATE] [--judge] [--replay]   (frozen GOLDM rules on SILVERM, sessions from 2026-11-12)
   serene research mcxdow      [--names A,B] [--from DATE] [--to DATE] [--frame 1h] [--lookback 720h] [--multiple 2.5] [--slip-ticks 1] [--trades FILE]
   serene research pdbreak     [--from DATE] [--to DATE] [--split 2025-09-01] [--offset-pct 1] [--slip-bps 30] [--trades FILE]
+  serene research pdlswing    [--from DATE] [--to DATE] [--split 2025-09-01] [--draws 200] [--slip-bps 30] [--trades FILE]   (PDL-break put swing, 3-day hold)
   serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
   serene research stockdiv    [--from 2005-01-01] [--to 2022-12-31] [--top 200] [--cost-pct 0.24] [--slip-bps 10] [--data DIR]
 
@@ -84,6 +85,7 @@ const usage = `serene researches and trades Indian index options.
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
   serene paper hmaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_hma_retest; entries/exits with P&L)
+  serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
 
 Not built yet:
   serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
@@ -178,6 +180,8 @@ func run(ctx context.Context, args []string) error {
 		return runEMACross(ctx, rest)
 	case "research pdbreak":
 		return runPDBreak(ctx, rest)
+	case "research pdlswing":
+		return runPDLSwing(ctx, rest)
 	case "research mcxcloud":
 		return runMCXCloud(ctx, rest)
 	case "research mcxema":
@@ -224,6 +228,8 @@ func run(ctx context.Context, args []string) error {
 		return runForwardSignals(ctx, rest)
 	case "paper hmaretest":
 		return runPaper(ctx, rest)
+	case "paper pdlswing":
+		return runPDLPaper(ctx, rest)
 	case "prod paper", "prod live":
 		return fmt.Errorf("%q is not built yet", cmd)
 	}

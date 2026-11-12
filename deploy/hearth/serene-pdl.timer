@@ -1,0 +1,14 @@
+[Unit]
+Description=serene pdl_swing_day, each minute of the NSE session
+
+[Timer]
+# 20 s past each minute, so Kite has finished the minute that just closed. The
+# command does nothing before 09:16 or on NSE holidays; the exit posts once the
+# 15:15 bar closes.
+OnCalendar=Mon..Fri *-*-* 09..15:*:20 Asia/Kolkata
+AccuracySec=1s
+# No catch-up after downtime: the next run posts anything missed.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=serene pdl_swing_day forward signals to Slack
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=serene
+Group=serene
+WorkingDirectory=/home/serene/app
+ExecStart=/home/serene/app/serene paper pdlswing --slack
+TimeoutStartSec=5min
