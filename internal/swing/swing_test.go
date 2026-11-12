@@ -254,3 +254,13 @@ func TestEntryFrom(t *testing.T) {
 		t.Errorf("trades %+v", got)
 	}
 }
+
+func TestPivotLows(t *testing.T) {
+	bars := series([3]float64{10, 9, 9}, [3]float64{10, 7, 8}, [3]float64{11, 8, 10},
+		[3]float64{10, 8, 9}, [3]float64{11, 9, 10}, [3]float64{10, 9, 9})
+	p := PivotLows(bars, 1)
+	// Bar 3's low equals bar 2's, so it is not a pivot.
+	if len(p) != 1 || p[0].Index != 1 || p[0].Low != market.Rupees(7) || !p[0].Confirmed.Equal(bars[2].End) {
+		t.Fatalf("pivot lows %+v", p)
+	}
+}

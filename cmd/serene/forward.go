@@ -78,24 +78,30 @@ func runForwardSignals(ctx context.Context, args []string) error {
 		}
 	}
 	err := forwardSignals(ctx, client, channel, *fetch, strings.Split(*only, ","), *sentPath, *niftyCfg, *mcxDir, *mcxCosts)
-	if client != nil {
-		// It runs every minute, so a failure is posted once, and so is the recovery.
-		failing := fileExists(*alertPath)
-		post := func(text string) {
-			if perr := client.Post(context.WithoutCancel(ctx), channel, text); perr != nil {
-				fmt.Fprintln(os.Stderr, "serene: slack:", perr)
-			}
-		}
-		switch {
-		case err != nil && !failing:
-			post(fmt.Sprintf(":x: *serene forward signals failed:* %v\nSignals are paused until it recovers; this is posted once.", err))
-			_ = os.WriteFile(*alertPath, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
-		case err == nil && failing:
-			post(":white_check_mark: *serene forward signals recovered*")
-			_ = os.Remove(*alertPath)
+	alertOnce(ctx, client, channel, *alertPath, "serene forward signals", err)
+	return err
+}
+
+// alertOnce posts a failure of a command run every minute once, and its
+// recovery once, using a marker file at path.
+func alertOnce(ctx context.Context, client *slack.Client, channel, path, what string, err error) {
+	if client == nil {
+		return
+	}
+	failing := fileExists(path)
+	post := func(text string) {
+		if perr := client.Post(context.WithoutCancel(ctx), channel, text); perr != nil {
+			fmt.Fprintln(os.Stderr, "serene: slack:", perr)
 		}
 	}
-	return err
+	switch {
+	case err != nil && !failing:
+		post(fmt.Sprintf(":x: *%s failed:* %v\nSignals are paused until it recovers; this is posted once.", what, err))
+		_ = os.WriteFile(path, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
+	case err == nil && failing:
+		post(fmt.Sprintf(":white_check_mark: *%s recovered*", what))
+		_ = os.Remove(path)
+	}
 }
 
 func fileExists(path string) bool {
@@ -194,12 +200,12 @@ func mcxForwardUnderlying(strat string) string {
 	return ""
 }
 
-// fetchMCX brings names' minute bars up to now, copying the Kite login
-// from project_calm first when CALM_DATABASE_URL is set.
-func fetchMCX(ctx context.Context, dir string, names []string) error {
+// kiteClient is a Kite client on the stored Zerodha login, copying it from
+// project_calm first when CALM_DATABASE_URL is set.
+func kiteClient(ctx context.Context) (*kite.Client, error) {
 	tokens, err := openTokens(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tokens.Close()
 	if url := os.Getenv("CALM_DATABASE_URL"); url != "" {
@@ -210,11 +216,20 @@ func fetchMCX(ctx context.Context, dir string, names []string) error {
 	}
 	token, err := auth.Load(ctx, tokens, "zerodha")
 	if err != nil {
-		return fmt.Errorf("%w (log in to Kite in project_calm)", err)
+		return nil, fmt.Errorf("%w (log in to Kite in project_calm)", err)
 	}
 	apiKey := os.Getenv("ZERODHA_API_KEY")
 	if apiKey == "" {
-		return errors.New("ZERODHA_API_KEY is not set")
+		return nil, errors.New("ZERODHA_API_KEY is not set")
+	}
+	return kite.New(apiKey, token.AccessToken), nil
+}
+
+// fetchMCX brings names' minute bars up to now from Kite.
+func fetchMCX(ctx context.Context, dir string, names []string) error {
+	kc, err := kiteClient(ctx)
+	if err != nil {
+		return err
 	}
 	lots, err := mcx.UpstoxLots(ctx)
 	if err != nil {
@@ -227,7 +242,7 @@ func fetchMCX(ctx context.Context, dir string, names []string) error {
 	defer store.Close()
 	cfg := mcx.Config{Dir: dir, Names: names, Minute: true,
 		Lookback: 500 * 24 * time.Hour, Log: func(string, ...any) {}}
-	return mcx.Run(ctx, cfg, store, kite.New(apiKey, token.AccessToken), lots)
+	return mcx.Run(ctx, cfg, store, kc, lots)
 }
 
 // emaCrossFirstSignals replays ema_cross_first from its forward start to the

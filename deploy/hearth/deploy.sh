@@ -19,7 +19,7 @@ command -v aarch64-linux-gnu-g++ > /dev/null ||
 CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ \
   go build -trimpath -ldflags '-s -w' -o "$work/release/serene" ./cmd/serene
 cp deploy/hearth/host.sh "$work/release/"
-mkdir "$work/release/configs" && cp configs/costs_mcx.yaml "$work/release/configs/"
+mkdir "$work/release/configs" && cp configs/costs_mcx.yaml configs/costs.yaml "$work/release/configs/"
 shopt -s nullglob # no units: host.sh removes the installed ones
 for u in deploy/hearth/serene-*.service deploy/hearth/serene-*.timer; do cp "$u" "$work/release/"; done
 shopt -u nullglob

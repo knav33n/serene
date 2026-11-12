@@ -32,6 +32,30 @@ func Pivots(bars []market.Bar, k int) []Pivot {
 	return out
 }
 
+// PivotLow is a swing low: a bar whose low is strictly below the k bars on
+// each side. It is known only once the k bars after it have closed.
+type PivotLow struct {
+	Index     int
+	Time      time.Time
+	Low       market.Paise
+	Confirmed time.Time // close of the k-th bar after the pivot
+}
+
+// PivotLows returns the swing lows, oldest first.
+func PivotLows(bars []market.Bar, k int) []PivotLow {
+	var out []PivotLow
+	for i := k; i+k < len(bars); i++ {
+		bottom := true
+		for j := i - k; j <= i+k && bottom; j++ {
+			bottom = j == i || bars[j].Low > bars[i].Low
+		}
+		if bottom {
+			out = append(out, PivotLow{Index: i, Time: bars[i].Time, Low: bars[i].Low, Confirmed: bars[i+k].End})
+		}
+	}
+	return out
+}
+
 // Kind tells the two breaks apart.
 type Kind int
 
