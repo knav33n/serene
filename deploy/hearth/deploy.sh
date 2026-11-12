@@ -28,7 +28,16 @@ tar -C "$work/release" -czf "$work/release.tar.gz" .
 
 account=$(aws sts get-caller-identity --query Account --output text)
 bucket=serene-$account key=releases/$rev.tar.gz
-aws s3 cp "$work/release.tar.gz" "s3://$bucket/$key" --only-show-errors
+# A slow or flaky uplink makes the default CRT client time out on the ~30 MB release, so upload it
+# with the classic client in 5 MB parts, one at a time, retrying each. The settings go on a copy of
+# the AWS config, so the user's own config is left alone.
+cfg=${AWS_CONFIG_FILE:-$HOME/.aws/config}
+[[ -f $cfg ]] && cp "$cfg" "$work/aws_config" || : > "$work/aws_config"
+for kv in s3.preferred_transfer_client=classic s3.max_concurrent_requests=1 \
+  s3.multipart_threshold=5MB s3.multipart_chunksize=5MB max_attempts=15 retry_mode=standard; do
+  AWS_CONFIG_FILE=$work/aws_config aws configure set "${kv%%=*}" "${kv#*=}"
+done
+AWS_CONFIG_FILE=$work/aws_config aws s3 cp "$work/release.tar.gz" "s3://$bucket/$key" --only-show-errors
 echo "uploaded $key ($(du -h "$work/release.tar.gz" | cut -f1))"
 
 instance=$(aws ec2 describe-instances --filters Name=tag:Name,Values=hearth Name=instance-state-name,Values=running \
