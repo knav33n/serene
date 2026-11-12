@@ -83,7 +83,7 @@ const usage = `serene researches and trades Indian index options.
 
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
-  serene paper emaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_ema_retest; entries/exits with P&L)
+  serene paper hmaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_hma_retest; entries/exits with P&L)
 
 Not built yet:
   serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
@@ -222,7 +222,7 @@ func run(ctx context.Context, args []string) error {
 		return runMCXFetch(ctx, rest)
 	case "forward signals":
 		return runForwardSignals(ctx, rest)
-	case "paper emaretest":
+	case "paper hmaretest":
 		return runPaper(ctx, rest)
 	case "prod paper", "prod live":
 		return fmt.Errorf("%q is not built yet", cmd)

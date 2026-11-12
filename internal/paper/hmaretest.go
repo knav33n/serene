@@ -13,21 +13,21 @@ import (
 	"serene/internal/swing"
 )
 
-// EMARetestName is the strategy's name in messages and records.
-const EMARetestName = "nifty_ema_retest"
+// HMARetestName is the strategy's name in messages and records.
+const HMARetestName = "nifty_hma_retest"
 
 // Leg is one watched option and its completed 1-minute bars, oldest first:
-// the previous trading day's, to warm the EMAs, then today's.
+// the previous trading day's, to warm the averages, then today's.
 type Leg struct {
 	Instrument market.Instrument
 	Bars       []market.Bar
 }
 
-// Config sets nifty_ema_retest's rules. The zero value is not usable; see
-// DefaultEMARetest.
+// Config sets nifty_hma_retest's rules. The zero value is not usable; see
+// DefaultHMARetest.
 type Config struct {
 	Day       market.Date
-	Fast      int           // EMA of closes; 13
+	Fast      int           // Hull moving average of closes; 13
 	Slow      int           // 34; the buy limit rests on it
 	SwingK    int           // a swing low is below this many bars each side
 	LastEntry time.Duration // after the open: no arms or fills from then
@@ -36,8 +36,8 @@ type Config struct {
 	Tick      market.Paise
 }
 
-// DefaultEMARetest is the paper-trading configuration agreed on 2026-11-12.
-func DefaultEMARetest(d market.Date) Config {
+// DefaultHMARetest is the paper-trading configuration agreed on 2026-11-12.
+func DefaultHMARetest(d market.Date) Config {
 	return Config{Day: d, Fast: 13, Slow: 34, SwingK: 2,
 		LastEntry: 5*time.Hour + 45*time.Minute, // 15:00
 		Exit:      6 * time.Hour,                // 15:15
@@ -59,11 +59,11 @@ type Trade struct {
 	Reason     string // "stop", "trailed stop" or "15:15"
 }
 
-// EMARetest replays the day. Each leg arms when its fast EMA closes above the
-// slow EMA after being at or below it on the bar before. While armed, a buy
-// limit rests at the slow EMA of the last closed bar and fills on the first bar
+// HMARetest replays the day. Each leg arms when its fast Hull MA closes above
+// the slow one after being at or below it on the bar before. While armed, a buy
+// limit rests at the slow HMA of the last closed bar and fills on the first bar
 // whose low reaches it, at the limit or that bar's open if lower. A close with
-// the fast EMA back at or below the slow cancels the arm. The stop is the most
+// the fast HMA back at or below the slow cancels the arm. The stop is the most
 // recent confirmed swing low of today below the fill; with none, or with the
 // capital too small for one lot, that arm is dropped and the leg waits for the
 // next cross. The first leg to fill is the day's trade. From the bar after the
@@ -71,9 +71,9 @@ type Trade struct {
 // lower, each newly confirmed higher swing low raises the stop, and the bar
 // starting at the time exit exits at its open. It returns nil if nothing has
 // filled.
-func EMARetest(legs []Leg, cfg Config) (*Trade, error) {
+func HMARetest(legs []Leg, cfg Config) (*Trade, error) {
 	if cfg.Fast < 1 || cfg.Slow <= cfg.Fast || cfg.SwingK < 1 || cfg.Capital <= 0 || cfg.Tick <= 0 {
-		return nil, errors.New("nifty_ema_retest: bad config")
+		return nil, errors.New("nifty_hma_retest: bad config")
 	}
 	var best *Trade
 	var bestLeg Leg
@@ -104,13 +104,13 @@ func today(bars []market.Bar, d market.Date) int {
 
 func entry(l Leg, cfg Config) (*Trade, error) {
 	if l.Instrument.LotSize <= 0 {
-		return nil, errors.New("nifty_ema_retest: " + l.Instrument.Key() + " has no lot size")
+		return nil, errors.New("nifty_hma_retest: " + l.Instrument.Key() + " has no lot size")
 	}
 	bars := l.Bars
 	t0 := today(bars, cfg.Day)
 	open := market.NSESession.Open(cfg.Day)
 	lastEntry := open.Add(cfg.LastEntry)
-	ef, es := indicator.EMA(bars, cfg.Fast), indicator.EMA(bars, cfg.Slow)
+	ef, es := indicator.HMA(bars, cfg.Fast), indicator.HMA(bars, cfg.Slow)
 	lows := swing.PivotLows(bars, cfg.SwingK)
 	var armed bool
 	var armedAt time.Time

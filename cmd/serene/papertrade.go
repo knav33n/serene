@@ -37,18 +37,18 @@ type paperDayState struct {
 	} `json:"legs"`
 }
 
-// runPaper paper trades nifty_ema_retest: each run fetches today's NIFTY
+// runPaper paper trades nifty_hma_retest: each run fetches today's NIFTY
 // open and the two ATM options' minute bars from Kite, replays the day and
 // posts the entry and exit once each. No order goes to a broker.
 func runPaper(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("paper emaretest", flag.ContinueOnError)
+	fs := flag.NewFlagSet("paper hmaretest", flag.ContinueOnError)
 	useSlack := fs.Bool("slack", false, "post new entries and exits to SLACK_PAPER_CHANNEL")
 	date := fs.String("date", "", "day to replay (default today, IST)")
 	dir := fs.String("dir", "data/paper", "per-day contract choices")
 	sentPath := fs.String("sent", "data/paper_sent.json", "events already posted")
 	alertPath := fs.String("alert", "data/paper_alert.json", "whether a failure has been posted")
 	costsFile := fs.String("costs", "configs/costs.yaml", "NFO charges schedule")
-	report := fs.String("report", "reports/paper_emaretest.csv", "closed trades, appended as they are posted")
+	report := fs.String("report", "reports/paper_hmaretest.csv", "closed trades, appended as they are posted")
 	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
 	from := fs.String("from", "2026-11-13", "first day of the paper trade; earlier days post nothing")
 	if err := fs.Parse(args); err != nil {
@@ -85,12 +85,12 @@ func runPaper(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	err = paperEMARetest(ctx, client, channel, d, now, *dir, *sentPath, *costsFile, *report, *step)
-	alertOnce(ctx, client, channel, *alertPath, "serene paper "+paper.EMARetestName, err)
+	err = paperHMARetest(ctx, client, channel, d, now, *dir, *sentPath, *costsFile, *report, *step)
+	alertOnce(ctx, client, channel, *alertPath, "serene paper "+paper.HMARetestName, err)
 	return err
 }
 
-func paperEMARetest(ctx context.Context, client *slack.Client, channel string, d market.Date, now time.Time,
+func paperHMARetest(ctx context.Context, client *slack.Client, channel string, d market.Date, now time.Time,
 	dir, sentPath, costsFile, report string, step float64) error {
 	costs, err := cost.Load(costsFile)
 	if err != nil {
@@ -131,7 +131,7 @@ func paperEMARetest(ctx context.Context, client *slack.Client, channel string, d
 		}
 		legs = append(legs, paper.Leg{Instrument: inst, Bars: bars})
 	}
-	tr, err := paper.EMARetest(legs, paper.DefaultEMARetest(d))
+	tr, err := paper.HMARetest(legs, paper.DefaultHMARetest(d))
 	if err != nil {
 		return err
 	}
@@ -205,9 +205,9 @@ func postPaper(ctx context.Context, client *slack.Client, channel string, tr *pa
 	type event struct{ id, text string }
 	at := func(t time.Time) string { return t.In(market.IST).Format("2006-01-02 15:04") }
 	evs := []event{{
-		id: fmt.Sprintf("%s|entry|%s|%s", paper.EMARetestName, tr.Instrument.Key(), tr.EntryTime.UTC().Format(time.RFC3339)),
+		id: fmt.Sprintf("%s|entry|%s|%s", paper.HMARetestName, tr.Instrument.Key(), tr.EntryTime.UTC().Format(time.RFC3339)),
 		text: fmt.Sprintf(":large_green_circle: *%s* BUY %s @ ₹%s · %d lots (%d qty) · SL ₹%s · %s",
-			paper.EMARetestName, name, tr.Entry, tr.Lots, tr.Qty, tr.Stop, at(tr.EntryTime)),
+			paper.HMARetestName, name, tr.Entry, tr.Lots, tr.Qty, tr.Stop, at(tr.EntryTime)),
 	}}
 	var row []string
 	if !tr.Open {
@@ -226,9 +226,9 @@ func postPaper(ctx context.Context, client *slack.Client, channel string, tr *pa
 			sign = ""
 		}
 		evs = append(evs, event{
-			id: fmt.Sprintf("%s|exit|%s|%s", paper.EMARetestName, tr.Instrument.Key(), tr.ExitTime.UTC().Format(time.RFC3339)),
+			id: fmt.Sprintf("%s|exit|%s|%s", paper.HMARetestName, tr.Instrument.Key(), tr.ExitTime.UTC().Format(time.RFC3339)),
 			text: fmt.Sprintf(":red_circle: *%s* SELL %s @ ₹%s · %s (SL ₹%s) · P&L ₹%s%s after ₹%s charges · %s",
-				paper.EMARetestName, name, tr.Exit, tr.Reason, tr.LastStop, sign, net, in+out, at(tr.ExitTime)),
+				paper.HMARetestName, name, tr.Exit, tr.Reason, tr.LastStop, sign, net, in+out, at(tr.ExitTime)),
 		})
 		row = []string{tr.EntryTime.In(market.IST).Format("2006-01-02"), name, at(tr.EntryTime), tr.Entry.String(),
 			fmt.Sprint(tr.Lots), fmt.Sprint(tr.Qty), tr.Stop.String(), at(tr.ExitTime), tr.Exit.String(), tr.Reason,

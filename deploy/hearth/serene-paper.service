@@ -1,5 +1,5 @@
 [Unit]
-Description=serene paper trade nifty_ema_retest to Slack
+Description=serene paper trade nifty_hma_retest to Slack
 Wants=network-online.target
 After=network-online.target postgresql.service
 
@@ -8,5 +8,5 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-ExecStart=/home/serene/app/serene paper emaretest --slack
+ExecStart=/home/serene/app/serene paper hmaretest --slack
 TimeoutStartSec=5min
