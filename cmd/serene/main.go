@@ -676,10 +676,7 @@ func runMarketDaily(ctx context.Context, args []string) error {
 	err := marketDaily(ctx, *dir, *catalog, *reports, dm)
 	if err != nil && dm != nil {
 		// A broken job must not look like a quiet day.
-		text := fmt.Sprintf(":x: *serene market daily failed:* %v", err)
-		if perr := dm.client.Post(context.WithoutCancel(ctx), dm.channel, text); perr != nil {
-			fmt.Fprintln(os.Stderr, "serene: slack:", perr)
-		}
+		postAlert(ctx, dm.client, dm.channel, fmt.Sprintf(":x: *serene market daily failed:* %v", err))
 	}
 	return err
 }

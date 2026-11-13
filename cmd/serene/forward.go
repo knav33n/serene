@@ -102,11 +102,7 @@ func alertOnce(ctx context.Context, client *slack.Client, channel, path, what st
 		return
 	}
 	failing := fileExists(path)
-	post := func(text string) {
-		if perr := client.Post(context.WithoutCancel(ctx), channel, text); perr != nil {
-			fmt.Fprintln(os.Stderr, "serene: slack:", perr)
-		}
-	}
+	post := func(text string) { postAlert(ctx, client, channel, text) }
 	switch {
 	case err != nil && !failing:
 		post(fmt.Sprintf(":x: *%s failed:* %v\nSignals are paused until it recovers; this is posted once.", what, err))
@@ -117,13 +113,30 @@ func alertOnce(ctx context.Context, client *slack.Client, channel, path, what st
 	}
 }
 
+// postAlert posts a failure or recovery to SLACK_ALERT_CHANNEL, or to fallback
+// when that isn't set or can't be resolved.
+func postAlert(ctx context.Context, client *slack.Client, fallback, text string) {
+	ctx = context.WithoutCancel(ctx)
+	channel := fallback
+	if target := os.Getenv("SLACK_ALERT_CHANNEL"); target != "" {
+		if c, err := client.Resolve(ctx, target); err != nil {
+			fmt.Fprintln(os.Stderr, "serene: SLACK_ALERT_CHANNEL:", err)
+		} else {
+			channel = c
+		}
+	}
+	if err := client.Post(ctx, channel, text); err != nil {
+		fmt.Fprintln(os.Stderr, "serene: slack:", err)
+	}
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
 // route is the Slack channel for a strategy's signals. Failure alerts go to
-// SLACK_TRADES_CHANNEL only.
+// SLACK_ALERT_CHANNEL, or SLACK_TRADES_CHANNEL without it.
 func forwardSignals(ctx context.Context, client *slack.Client, route func(strategy string) string, fetch bool, only []string,
 	sentPath, niftyCfg, mcxDir, mcxCosts string) error {
 	var all []fwdSignal

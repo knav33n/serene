@@ -111,7 +111,8 @@ systemctl --user enable --now serene-market.timer
 Slack needs `SLACK_TOKEN` and `SLACK_CHANNEL` in `.env`, and the app needs
 `chat:write` and `files:write`. Each close posts one message: a chart card and the
 full HTML report. The card is rendered with headless Chrome or Chromium, and if that
-fails the summary goes out as text with an alert. Other failures post to Slack too.
+fails the summary goes out as text with an alert. Other failures post to Slack too:
+to `SLACK_ALERT_CHANNEL` if it is set, as they do for every job, else to `SLACK_CHANNEL`.
 
 The regime is **Bull**, **Neutral** or **Bear**, from seven checks on Nifty 500
 scored -7 to +7. It enters Bull at +4 and Bear at -4, leaves at +1 and -1, and
