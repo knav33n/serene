@@ -87,6 +87,31 @@ frozen, with `--unseal`, which is recorded. Every run is also logged to
 `data/upstox/trials.jsonl`, and reports show how many parameter sets have been
 tried for that strategy.
 
+## Fyers data
+
+Fyers holds expired NSE options (NIFTY, BANKNIFTY, stocks) from 2018-10-10 and
+SENSEX options from 2023-08-07, as 1-minute bars with OI. Everything it downloads
+goes to `F:/INSIGHTS/fyers` (`configs/fyers.yaml`), in the same Parquet layout as
+`data/upstox`. It needs the Prime plan; `plan: standard` in the config keeps to
+Standard's caps instead. Set `FYERS_APP_ID`, `FYERS_SECRET` and `FYERS_REDIRECT_URI`
+in `.env`, then log in with `serene auth`.
+
+```sh
+./serene fyers probe      # once: what history Fyers really serves (probe.parquet)
+./serene fyers index      # 1m and daily index bars from 2017; options pick strikes from them
+./serene fyers backfill   # expired options, newest expiry first; safe to rerun
+./serene fyers update     # daily after the close
+```
+
+The client stays under the plan's rate limits and stops on a rate-limit error,
+because Fyers blocks the account for the day after repeated breaches. Daily usage
+is kept in `fetch/usage.json`. Lot sizes come from `data/upstox` where it covers
+an expiry, and from the live symbol master going forward. For older expiries,
+add the size once, e.g. `serene fyers lot --underlying NIFTY --from 2018-10-01 --size 75`;
+backfill stops and says so when one is missing. To backtest, set both `data_dir`
+and `settlement` to `F:/INSIGHTS/fyers`. Expiries then settle at Fyers' daily
+index close, which is also the only settlement source for SENSEX.
+
 ## Daily market report
 
 Stores every Nifty index from NSE's daily file and reports which sectors are

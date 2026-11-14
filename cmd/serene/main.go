@@ -82,6 +82,12 @@ const usage = `serene researches and trades Indian index options.
   serene equities adjust      [--symbols A,B] [--recheck] [--data DIR]
   serene equities daily       [--data DIR]
 
+  serene fyers probe          [--underlying A,B] [--config configs/fyers.yaml]   (what history Fyers really serves; saves probe.parquet)
+  serene fyers index          [--underlying A,B] [--from 2017-07-03]   (1m and daily spot bars into F:/INSIGHTS/fyers)
+  serene fyers backfill       [--underlying A,B] [--from DATE] [--to DATE]   (expired options, 1m with OI; resumable)
+  serene fyers update         [--underlying A,B]   (daily: live lot sizes, new spot days, newly expired options)
+  serene fyers lot            --underlying NAME --from DATE --size N   (record a lot size for expiries from DATE)
+
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
   serene paper hmaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_hma_retest; entries/exits with P&L)
@@ -224,6 +230,8 @@ func run(ctx context.Context, args []string) error {
 		return runEquitiesDaily(ctx, rest)
 	case "mcx fetch":
 		return runMCXFetch(ctx, rest)
+	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot":
+		return runFyers(ctx, args[1], rest)
 	case "forward signals":
 		return runForwardSignals(ctx, rest)
 	case "paper hmaretest":
@@ -1203,15 +1211,30 @@ func settlementCloses(ctx context.Context, c config, spec analytics.Spec) (map[m
 	case "last_bar":
 		return nil, nil
 	}
-	name, ok := settlementIndex[spec.Underlying]
-	if !ok {
-		return nil, fmt.Errorf("no settlement index for %s", spec.Underlying)
-	}
 	store, err := data.Open(c.Settlement)
 	if err != nil {
 		return nil, err
 	}
 	defer store.Close()
+	// A Fyers store holds each index's own daily closes, which is the only
+	// settlement source for BSE indices such as SENSEX.
+	if _, err := os.Stat(filepath.Join(c.Settlement, "daily", "underlying="+spec.Underlying+".parquet")); err == nil {
+		bars, err := store.Daily(ctx, spec.Underlying)
+		if err != nil {
+			return nil, err
+		}
+		closes := map[market.Date]market.Paise{}
+		for _, b := range bars {
+			if d := market.DateOf(b.Time); !d.Before(spec.From) && !spec.To.Before(d) {
+				closes[d] = b.Close
+			}
+		}
+		return closes, nil
+	}
+	name, ok := settlementIndex[spec.Underlying]
+	if !ok {
+		return nil, fmt.Errorf("no settlement index for %s: set settlement to a Fyers store, e.g. F:/INSIGHTS/fyers", spec.Underlying)
+	}
 	rows, err := store.IndexDays(ctx, spec.From, spec.To)
 	if err != nil {
 		return nil, err

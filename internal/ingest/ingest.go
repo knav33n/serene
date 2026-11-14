@@ -218,9 +218,15 @@ func fetchIndex(ctx context.Context, cfg Config, store *data.Store, c *upstox.Cl
 // strikeBand returns the index range over the window before expiry, widened by
 // pct. Contracts outside it are too far out of the money to be worth a request.
 func strikeBand(idx *IndexRecord, e market.Date, pct float64) (float64, float64, error) {
+	return StrikeBand(idx.Closes, e, pct)
+}
+
+// StrikeBand is strikeBand over daily [low, high] index closes keyed by date.
+// The Fyers ingest shares it.
+func StrikeBand(closes map[string][2]float64, e market.Date, pct float64) (float64, float64, error) {
 	lo, hi := 0.0, 0.0
 	for d := e.AddDays(-bandWindow); !e.Before(d); d = d.AddDays(1) {
-		v, ok := idx.Closes[d.String()]
+		v, ok := closes[d.String()]
 		if !ok {
 			continue
 		}

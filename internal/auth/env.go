@@ -46,7 +46,7 @@ func LoadDotEnv(path string) error {
 }
 
 // Brokers lists every broker in display order.
-var Brokers = []struct{ Name, Label string }{{"upstox", "Upstox"}, {"zerodha", "Zerodha"}}
+var Brokers = []struct{ Name, Label string }{{"upstox", "Upstox"}, {"zerodha", "Zerodha"}, {"fyers", "Fyers"}}
 
 // upstoxRedirect is sent on every Upstox login and must exactly match the URI
 // registered on the app. Zerodha takes its redirect from its console instead.
@@ -57,6 +57,14 @@ func upstoxRedirect(baseURL string) string {
 	return baseURL + "/callback/upstox"
 }
 
+// fyersRedirect must exactly match the redirect URL registered on the Fyers app.
+func fyersRedirect(baseURL string) string {
+	if v := os.Getenv("FYERS_REDIRECT_URI"); v != "" {
+		return v
+	}
+	return baseURL + "/callback/fyers"
+}
+
 // ProvidersFromEnv builds a provider for each broker with keys set.
 func ProvidersFromEnv(baseURL string) map[string]Provider {
 	out := map[string]Provider{}
@@ -65,6 +73,9 @@ func ProvidersFromEnv(baseURL string) map[string]Provider {
 	}
 	if k, s := os.Getenv("ZERODHA_API_KEY"), os.Getenv("ZERODHA_API_SECRET"); k != "" && s != "" {
 		out["zerodha"] = &Zerodha{APIKey: k, APISecret: Secret(s)}
+	}
+	if k, s := os.Getenv("FYERS_APP_ID"), os.Getenv("FYERS_SECRET"); k != "" && s != "" {
+		out["fyers"] = &Fyers{AppID: k, Secret: Secret(s), RedirectURI: fyersRedirect(baseURL)}
 	}
 	return out
 }
