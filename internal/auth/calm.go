@@ -82,7 +82,9 @@ func ImportCalm(ctx context.Context, calmURL string, s Store) ([]string, error) 
 		if err != nil && !errors.Is(err, ErrNoToken) {
 			return updated, err
 		}
-		if err == nil && !t.IssuedAt.After(old.IssuedAt) && old.AccessToken == t.AccessToken {
+		// Only a newer login replaces the stored one: an older project_calm
+		// session would otherwise overwrite a fresh serene auth login.
+		if err == nil && !t.IssuedAt.After(old.IssuedAt) {
 			continue
 		}
 		if err := s.Put(ctx, t); err != nil {
