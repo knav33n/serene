@@ -90,6 +90,8 @@ const usage = `serene researches and trades Indian index options.
 
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
+  serene etf fetch            [--symbols A,B] [--dir F:/INSIGHTS/etf] [--data data/equities]   (every NSE ETF, daily and 1m; resumable)
+
   serene paper hmaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_hma_retest; entries/exits with P&L)
   serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
 
@@ -230,6 +232,8 @@ func run(ctx context.Context, args []string) error {
 		return runEquitiesDaily(ctx, rest)
 	case "mcx fetch":
 		return runMCXFetch(ctx, rest)
+	case "etf fetch":
+		return runETFFetch(ctx, rest)
 	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot":
 		return runFyers(ctx, args[1], rest)
 	case "forward signals":

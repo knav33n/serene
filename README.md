@@ -112,6 +112,27 @@ backfill stops and says so when one is missing. To backtest, set both `data_dir`
 and `settlement` to `F:/INSIGHTS/fyers`. Expiries then settle at Fyers' daily
 index close, which is also the only settlement source for SENSEX.
 
+## ETF data
+
+Daily and 1-minute history for every ETF traded on NSE, into `F:/INSIGHTS/etf`,
+grouped by the country of the fund's holdings (`us`, `hongkong`, `india`). It
+needs a Kite or Upstox login from today, ideally both, and the bhavcopy store
+from `serene equities fetch`.
+
+```sh
+./serene etf fetch                 # all of them; the first run takes hours, later ones bring files up to date
+./serene etf fetch --symbols MON100,MAFANG
+```
+
+Files are `<country>/daily/<SYM>.parquet` and `<country>/1m/<SYM>.parquet`, with
+prices in rupees, split-adjusted, and a `source` column. `universe.csv` lists each
+ETF with every symbol and ISIN it has traded under, and `coverage.csv` what each
+file holds. Kite only has a fund's history since its last rename, so the rest comes
+from the bhavcopy (daily, adjusted for splits, `source = bhav_adj`) and from Upstox,
+which keys by ISIN (1-minute, from 2022). Before 2022 a renamed fund's 1-minute
+bars start at the rename. Windows already downloaded are kept in `<country>/raw/`,
+so a stopped run carries on where it was.
+
 ## Daily market report
 
 Stores every Nifty index from NSE's daily file and reports which sectors are
