@@ -71,6 +71,7 @@ const usage = `serene researches and trades Indian index options.
   serene research pdlswing    [--from DATE] [--to DATE] [--split 2025-09-01] [--draws 200] [--slip-bps 30] [--trades FILE]   (PDL-break put swing, 3-day hold)
   serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
   serene research stockdiv    [--from 2005-01-01] [--to 2022-12-31] [--top 200] [--cost-pct 0.24] [--slip-bps 10] [--data DIR]
+  serene research stockema    [--list configs/nifty500.csv] [--short] [--from 2005-01-01] [--split 2019-01-01] [--to 2022-12-31] [--cost-pct 0.24] [--out reports/nifty500_ema.csv]   (daily EMA crosses per stock)
 
   serene market fetch         [--from DATE] [--to DATE] [--rebuild] [--data DIR] [--catalog FILE]
   serene market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
@@ -184,6 +185,8 @@ func run(ctx context.Context, args []string) error {
 		return runGrid(ctx, rest)
 	case "research stockdiv":
 		return runStockDiv(ctx, rest)
+	case "research stockema":
+		return runStockEMA(ctx, rest)
 	case "research emacross":
 		return runEMACross(ctx, rest)
 	case "research pdbreak":
