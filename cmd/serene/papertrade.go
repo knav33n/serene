@@ -51,8 +51,22 @@ func runPaper(ctx context.Context, args []string) error {
 	report := fs.String("report", "reports/paper_hmaretest.csv", "closed trades, appended as they are posted")
 	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
 	from := fs.String("from", "2026-11-13", "first day of the paper trade; earlier days post nothing")
+	liveBrokers := fs.String("live", "", "also trade with real orders on these accounts: zerodha,upstox")
+	capital := fs.Float64("capital", 100000, "the most a live trade spends, in rupees; less if the account has less")
+	maxQty := fs.Int64("max-qty", 1755, "the largest live order, within NIFTY's freeze quantity")
+	liveDir := fs.String("live-dir", "data/live", "live order state; a STOP file here stops new entries")
+	liveReport := fs.String("live-report", "reports/live_hmaretest.csv", "closed live trades")
+	check := fs.Bool("check", false, "with --live: show each account's funds, positions and orders, and place nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	brokers, err := parseBrokers(*liveBrokers)
+	if err != nil {
+		return err
+	}
+	lo := liveOpts{brokers: brokers, capital: market.Rupees(*capital), maxQty: *maxQty, dir: *liveDir, report: *liveReport}
+	if *check {
+		return liveCheck(ctx, brokers, *dir, *step)
 	}
 	now := time.Now().In(market.IST)
 	d := market.DateOf(now)
@@ -85,13 +99,13 @@ func runPaper(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	err = paperHMARetest(ctx, client, channel, d, now, *dir, *sentPath, *costsFile, *report, *step)
+	err = paperHMARetest(ctx, client, channel, d, now, *dir, *sentPath, *costsFile, *report, *step, lo)
 	alertOnce(ctx, client, channel, *alertPath, "serene paper "+paper.HMARetestName, err)
 	return err
 }
 
 func paperHMARetest(ctx context.Context, client *slack.Client, channel string, d market.Date, now time.Time,
-	dir, sentPath, costsFile, report string, step float64) error {
+	dir, sentPath, costsFile, report string, step float64, lo liveOpts) error {
 	costs, err := cost.Load(costsFile)
 	if err != nil {
 		return err
@@ -130,6 +144,12 @@ func paperHMARetest(ctx context.Context, client *slack.Client, channel string, d
 			}
 		}
 		legs = append(legs, paper.Leg{Instrument: inst, Bars: bars})
+	}
+	if len(lo.brokers) > 0 {
+		// Each broker's failure is alerted on its own, apart from the paper trade's.
+		if err := liveHMARetest(ctx, client, channel, kc, st, legs, costs, d, now, lo); err != nil {
+			fmt.Fprintln(os.Stderr, "live:", err)
+		}
 	}
 	tr, err := paper.HMARetest(legs, paper.DefaultHMARetest(d))
 	if err != nil {

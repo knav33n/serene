@@ -203,3 +203,67 @@ func exit(l Leg, cfg Config, t *Trade) {
 func floorTick(p, tick market.Paise) market.Paise {
 	return p / tick * tick
 }
+
+// Arm is a leg's buy for the bar after its last one: a limit at the slow HMA
+// and the stop a fill there would take.
+type Arm struct {
+	Instrument  market.Instrument
+	ArmedAt     time.Time
+	Limit, Stop market.Paise
+	Close       market.Paise // the last bar's close
+}
+
+// Arms returns each leg armed after its last bar, by the replay's rules, for
+// live orders. Unlike the replay, a touch of the limit doesn't use up an arm:
+// a live order the touch didn't fill keeps resting. A leg with no swing low
+// below the limit yet is left out, and nothing is armed from cfg.LastEntry.
+func Arms(legs []Leg, cfg Config) []Arm {
+	var out []Arm
+	for _, l := range legs {
+		bars := l.Bars
+		t0 := today(bars, cfg.Day)
+		n := len(bars)
+		if n < 2 || t0 >= n {
+			continue
+		}
+		if !bars[n-1].End.Before(market.NSESession.Open(cfg.Day).Add(cfg.LastEntry)) {
+			continue
+		}
+		ef, es := indicator.HMA(bars, cfg.Fast), indicator.HMA(bars, cfg.Slow)
+		var armed bool
+		var armedAt time.Time
+		for i := max(t0, 1); i < n; i++ {
+			if math.IsNaN(es[i]) || math.IsNaN(es[i-1]) {
+				continue
+			}
+			switch {
+			case !(ef[i] > es[i]):
+				armed = false
+			case !(ef[i-1] > es[i-1]):
+				armed, armedAt = true, bars[i].Time
+			}
+		}
+		if !armed {
+			continue
+		}
+		limit := floorTick(market.Rupees(es[n-1]), cfg.Tick)
+		stop, ok := lastLowBelow(swing.PivotLows(bars, cfg.SwingK), t0, bars[n-1].End, limit)
+		if ok && limit > 0 {
+			out = append(out, Arm{Instrument: l.Instrument, ArmedAt: armedAt, Limit: limit, Stop: stop, Close: bars[n-1].Close})
+		}
+	}
+	return out
+}
+
+// StopFor is the stop a buy at price, filled in the bar starting at, takes:
+// the most recent of today's swing lows confirmed by then below price.
+func StopFor(l Leg, cfg Config, at time.Time, price market.Paise) (market.Paise, bool) {
+	return lastLowBelow(swing.PivotLows(l.Bars, cfg.SwingK), today(l.Bars, cfg.Day), at, price)
+}
+
+// Manage runs the replay's exit rules over l's bars for a trade filled live:
+// it raises t.LastStop and closes t when a bar hits the stop or the time exit
+// comes.
+func Manage(l Leg, cfg Config, t *Trade) {
+	exit(l, cfg, t)
+}
