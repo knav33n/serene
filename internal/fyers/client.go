@@ -26,6 +26,10 @@ var (
 	// block for the rest of the day, so the job stops instead.
 	ErrRateLimited = errors.New("fyers rate limit exceeded: stopping before the account is blocked for the day")
 	ErrServer      = errors.New("fyers server error")
+	// ErrNoData is Fyers' code -50 "Invalid input", which it returns for a
+	// range before a series starts and for a symbol it doesn't know, such as a
+	// delisted stock's spot or a strike that never listed.
+	ErrNoData = errors.New("fyers has no such data")
 )
 
 // Client calls the Fyers data APIs through a shared limiter.
@@ -115,6 +119,8 @@ func (c *Client) once(ctx context.Context, path string, q url.Values, expiredInt
 		return true, fmt.Errorf("unreadable response (HTTP %d): %w", resp.StatusCode, jsonErr)
 	case env.S == "no_data":
 		return false, json.Unmarshal(body, out)
+	case env.Code == -50:
+		return false, fmt.Errorf("%w: HTTP %d code %d %s", ErrNoData, resp.StatusCode, env.Code, env.Message)
 	case resp.StatusCode != http.StatusOK || env.S != "ok":
 		return false, fmt.Errorf("fyers %s: HTTP %d code %d %s", path, resp.StatusCode, env.Code, env.Message)
 	}

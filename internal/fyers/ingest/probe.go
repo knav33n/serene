@@ -133,6 +133,9 @@ func firstData(ctx context.Context, c *fyers.Client, symbol string, res fyers.Re
 			break
 		}
 		cs, err := c.History(ctx, symbol, res, w[0], w[1], false)
+		if errors.Is(err, fyers.ErrNoData) {
+			continue // before the series starts
+		}
 		if err != nil {
 			return market.Date{}, err
 		}

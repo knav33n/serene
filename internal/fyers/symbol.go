@@ -11,25 +11,52 @@ import (
 
 // Underlying is something Fyers lists derivatives on.
 type Underlying struct {
-	Name   string          // serene's name, e.g. NIFTY; also the ticker prefix
+	Name   string          // serene's name, e.g. NIFTY or M_M: safe as a store partition
+	Ticker string          // the exchange's symbol and ticker prefix, e.g. M&M; empty means Name
 	Symbol string          // Fyers spot symbol, e.g. NSE:NIFTY50-INDEX
 	Spot   market.Exchange // NSE or BSE: where the spot trades
 }
 
+// Exch is the exchange's symbol, which prefixes its contracts' tickers.
+func (u Underlying) Exch() string {
+	if u.Ticker != "" {
+		return u.Ticker
+	}
+	return u.Name
+}
+
+// SafeName turns an exchange symbol into serene's name for it: the store
+// takes only letters, digits, '-' and '_', so M&M becomes M_M.
+func SafeName(symbol string) string { return strings.ReplaceAll(symbol, "&", "_") }
+
 // Indices maps serene's index names to their Fyers spot symbols.
 var Indices = map[string]Underlying{
-	"NIFTY":     {Name: "NIFTY", Symbol: "NSE:NIFTY50-INDEX", Spot: market.NSE},
-	"BANKNIFTY": {Name: "BANKNIFTY", Symbol: "NSE:NIFTYBANK-INDEX", Spot: market.NSE},
-	"SENSEX":    {Name: "SENSEX", Symbol: "BSE:SENSEX-INDEX", Spot: market.BSE},
+	"NIFTY":      {Name: "NIFTY", Symbol: "NSE:NIFTY50-INDEX", Spot: market.NSE},
+	"BANKNIFTY":  {Name: "BANKNIFTY", Symbol: "NSE:NIFTYBANK-INDEX", Spot: market.NSE},
+	"FINNIFTY":   {Name: "FINNIFTY", Symbol: "NSE:FINNIFTY-INDEX", Spot: market.NSE},
+	"MIDCPNIFTY": {Name: "MIDCPNIFTY", Symbol: "NSE:MIDCPNIFTY-INDEX", Spot: market.NSE},
+	"NIFTYNXT50": {Name: "NIFTYNXT50", Symbol: "NSE:NIFTYNXT50-INDEX", Spot: market.NSE},
+	"SENSEX":     {Name: "SENSEX", Symbol: "BSE:SENSEX-INDEX", Spot: market.BSE},
+	"BANKEX":     {Name: "BANKEX", Symbol: "BSE:BANKEX-INDEX", Spot: market.BSE},
+}
+
+// IsIndex reports whether the underlying is an index rather than a stock.
+func (u Underlying) IsIndex() bool {
+	_, ok := Indices[u.Name]
+	return ok
 }
 
 // Lookup returns an index from Indices, or treats any other name as an NSE
-// stock such as SBIN (NSE:SBIN-EQ).
+// stock such as SBIN (NSE:SBIN-EQ) or M&M (NSE:M&M-EQ, stored as M_M).
 func Lookup(name string) Underlying {
 	if u, ok := Indices[name]; ok {
 		return u
 	}
-	return Underlying{Name: name, Symbol: "NSE:" + name + "-EQ", Spot: market.NSE}
+	u := Underlying{Name: SafeName(name), Symbol: "NSE:" + name + "-EQ", Spot: market.NSE}
+	if u.Name != name {
+		u.Ticker = name
+	}
+	return u
 }
 
 // Derivatives is the exchange segment its contracts trade on.
@@ -44,12 +71,24 @@ func (u Underlying) Derivatives() market.Exchange {
 // underlying's price.
 func (u Underlying) SpotKey() string { return market.Index(u.Spot, u.Name).Key() }
 
-// Earliest is the first date Fyers holds expired contracts for, by exchange.
+// Earliest is a floor below the first expiry Fyers holds for any underlying
+// (NSE from 2018-10-25, BSE from 2023-07-28). The expiry list itself decides
+// where each one really starts.
 func (u Underlying) Earliest() market.Date {
-	if u.Spot == market.BSE {
-		return market.Date{Year: 2023, Month: time.August, Day: 7}
+	return market.Date{Year: 2018, Month: time.January, Day: 1}
+}
+
+// MonthlyTicker is the Fyers ticker of a monthly contract, as the expired
+// history service names it: NSE:SBIN18OCT280CE, NSE:ASHOKLEY19JAN97.5CE, or
+// NSE:SBIN18OCTFUT for right "FUT". It is for contracts Fyers no longer lists
+// under their underlying, such as a delisted stock's.
+func MonthlyTicker(u Underlying, expiry market.Date, strike float64, right string) string {
+	mon := strings.ToUpper(expiry.Month.String()[:3])
+	head := fmt.Sprintf("%s:%s%02d%s", u.Spot, u.Exch(), expiry.Year%100, mon)
+	if right == "FUT" {
+		return head + "FUT"
 	}
-	return market.Date{Year: 2018, Month: time.October, Day: 10}
+	return head + strconv.FormatFloat(strike, 'f', -1, 64) + right
 }
 
 // weeklyMonth is the one-character month in weekly option tickers.
@@ -65,10 +104,10 @@ var weeklyMonth = map[byte]time.Month{'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6
 //	NSE:NIFTY25MARFUT        future
 func ParseContract(ticker string, u Underlying, expiry market.Date) (market.Instrument, error) {
 	exch, rest, ok := strings.Cut(ticker, ":")
-	if !ok || market.Exchange(exch) != u.Spot || !strings.HasPrefix(rest, u.Name) {
+	if !ok || market.Exchange(exch) != u.Spot || !strings.HasPrefix(rest, u.Exch()) {
 		return market.Instrument{}, fmt.Errorf("%q is not a %s contract", ticker, u.Name)
 	}
-	rest = rest[len(u.Name):]
+	rest = rest[len(u.Exch()):]
 	if len(rest) < 8 {
 		return market.Instrument{}, fmt.Errorf("%q: too short", ticker)
 	}

@@ -1,15 +1,19 @@
-# Fyers history download: serene fyers probe|index|backfill|update|lot
+# Fyers history download: serene fyers probe|lots|all|index|backfill|update|lot
 plan: prime # prime or standard: sets the request caps the client stays under
-dir: F:/INSIGHTS/fyers # every Fyers file goes here, apart from F:/MARKET_DATA
+dir: "/run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers" # every Fyers file goes here; market data lives under data/ (-> MARKET_DATA)
 upstox_dir: data/upstox # read only, for exact lot sizes of expiries it covers
 band_pct: 5 # keep strikes this far outside the index's range in the 30 days before expiry
-workers: 4 # contracts fetched at once, all under one rate limiter
+workers: 8 # contracts fetched at once, all under one rate limiter (4 reached ~200 req/min of the 450 allowed)
 
-# Indices are known by name (NIFTY, BANKNIFTY, SENSEX). Any other name is an
-# NSE stock, fetched as NSE:<NAME>-EQ.
-underlyings: [NIFTY, BANKNIFTY, SENSEX]
-# Add stock option underlyings here, e.g. [RELIANCE, HDFCBANK, SBIN]
+# Indices are known by name (see Indices in internal/fyers/symbol.go). Any
+# other name is an NSE stock, fetched as NSE:<NAME>-EQ.
+underlyings: [NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50, SENSEX, BANKEX]
+# Extra stock underlyings, e.g. [RELIANCE, HDFCBANK, SBIN]
 stocks: []
+# Also every stock in <dir>/universe.csv, which serene fyers lots writes from
+# the NSE bhavcopies: each stock with options on any day since 2018-10,
+# including those since dropped from F&O or delisted. Empty turns it off.
+stocks_file: universe.csv
 
 # Symbol master segments read for live lot sizes.
 segments: [NSE_FO, BSE_FO]

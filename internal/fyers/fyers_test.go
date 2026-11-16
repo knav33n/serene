@@ -269,3 +269,32 @@ func TestParseMaster(t *testing.T) {
 		t.Fatalf("%+v", rows)
 	}
 }
+
+func TestMonthlyTickerRoundTrips(t *testing.T) {
+	u := Lookup("M&M")
+	e := d(2019, 1, 31)
+	for k, want := range map[float64]string{97.5: "NSE:M&M19JAN97.5CE", 700: "NSE:M&M19JAN700CE"} {
+		got := MonthlyTicker(u, e, k, "CE")
+		if got != want {
+			t.Errorf("%g: %s, want %s", k, got, want)
+		}
+		inst, err := ParseContract(got, u, e)
+		if err != nil || inst.Strike.Rupees() != k || inst.Underlying != "M_M" {
+			t.Errorf("%s parsed to %+v %v", got, inst, err)
+		}
+	}
+	if got := MonthlyTicker(Indices["BANKEX"], d(2023, 7, 28), 0, "FUT"); got != "BSE:BANKEX23JULFUT" {
+		t.Errorf("future %s", got)
+	}
+}
+
+func TestInvalidInputIsNoData(t *testing.T) {
+	c := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"s":"error","code":-50,"message":"Invalid input"}`)
+	})
+	_, err := c.History(context.Background(), "NSE:NIFTY50-INDEX", Minute, d(2017, 7, 3), d(2017, 7, 8), false)
+	if !errors.Is(err, ErrNoData) {
+		t.Fatalf("got %v", err)
+	}
+}

@@ -15,6 +15,7 @@ import (
 
 	"serene/internal/auth"
 	"serene/internal/data"
+	"serene/internal/fobhav"
 	"serene/internal/fyers"
 	fyingest "serene/internal/fyers/ingest"
 	"serene/internal/market"
@@ -22,26 +23,49 @@ import (
 
 // fyersConfig is configs/fyers.yaml.
 type fyersConfig struct {
-	Plan        string   `yaml:"plan"`
-	Dir         string   `yaml:"dir"`
-	UpstoxDir   string   `yaml:"upstox_dir"`
-	BandPct     float64  `yaml:"band_pct"`
-	Workers     int      `yaml:"workers"`
-	Underlyings []string `yaml:"underlyings"`
-	Stocks      []string `yaml:"stocks"`
-	Segments    []string `yaml:"segments"`
+	Plan string `yaml:"plan"`
+	// ExpiredPerDay caps expired-contract intraday requests a day, for the
+	// limit Fyers enforces below its published Prime caps; 0 keeps the plan's.
+	ExpiredPerDay int      `yaml:"expired_per_day"`
+	Dir           string   `yaml:"dir"`
+	UpstoxDir     string   `yaml:"upstox_dir"`
+	BandPct       float64  `yaml:"band_pct"`
+	Workers       int      `yaml:"workers"`
+	Underlyings   []string `yaml:"underlyings"`
+	Stocks        []string `yaml:"stocks"`
+	// StocksFile adds every stock in a universe.csv that serene fyers lots
+	// writes: each stock with options on any day since 2018-10, delisted too.
+	StocksFile string   `yaml:"stocks_file"`
+	Segments   []string `yaml:"segments"`
 }
 
-func (c fyersConfig) all() []fyers.Underlying {
-	var out []fyers.Underlying
-	for _, n := range append(append([]string{}, c.Underlyings...), c.Stocks...) {
-		out = append(out, fyers.Lookup(strings.ToUpper(n)))
+func (c fyersConfig) all() ([]fyers.Underlying, error) {
+	names := append(append([]string{}, c.Underlyings...), c.Stocks...)
+	if c.StocksFile != "" {
+		path := c.StocksFile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(c.Dir, path)
+		}
+		uni, err := fobhav.ReadUniverse(path)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		names = append(names, uni...)
 	}
-	return out
+	var out []fyers.Underlying
+	seen := map[string]bool{}
+	for _, n := range names {
+		u := fyers.Lookup(strings.ToUpper(strings.TrimSpace(n)))
+		if !seen[u.Name] {
+			seen[u.Name] = true
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }
 
 func loadFyersConfig(path string) (fyersConfig, error) {
-	c := fyersConfig{Plan: "prime", Dir: "F:/INSIGHTS/fyers", BandPct: 5, Workers: 4}
+	c := fyersConfig{Plan: "prime", Dir: "/run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers", BandPct: 5, Workers: 4}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, err
@@ -68,6 +92,9 @@ func openFyers(ctx context.Context, configPath string, needToken bool) (*fyersSe
 	limits, err := fyers.LimitsFor(cfg.Plan)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.ExpiredPerDay > 0 {
+		limits.ExpiredIntraday = cfg.ExpiredPerDay
 	}
 	lim, err := fyers.NewLimiter(limits, filepath.Join(cfg.Dir, "fetch", "usage.json"))
 	if err != nil {
@@ -104,7 +131,7 @@ func stamp(format string, a ...any) {
 }
 
 // pick returns the named underlyings, or every configured one.
-func (s *fyersSession) pick(names string) []fyers.Underlying {
+func (s *fyersSession) pick(names string) ([]fyers.Underlying, error) {
 	if names == "" {
 		return s.cfg.all()
 	}
@@ -112,7 +139,7 @@ func (s *fyersSession) pick(names string) []fyers.Underlying {
 	for _, n := range strings.Split(names, ",") {
 		out = append(out, fyers.Lookup(strings.ToUpper(strings.TrimSpace(n))))
 	}
-	return out
+	return out, nil
 }
 
 func runFyers(ctx context.Context, sub string, args []string) error {
@@ -125,11 +152,18 @@ func runFyers(ctx context.Context, sub string, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	s, err := openFyers(ctx, *configPath, sub != "lot")
+	s, err := openFyers(ctx, *configPath, sub != "lot" && sub != "lots")
 	if err != nil {
 		return err
 	}
 	defer s.store.Close()
+	if sub == "lots" {
+		return runFyersLots(ctx, s)
+	}
+	us, err := s.pick(*names)
+	if err != nil {
+		return err
+	}
 	t, err := market.ParseDate(*to)
 	if err != nil {
 		return err
@@ -147,7 +181,7 @@ func runFyers(ctx context.Context, sub string, args []string) error {
 
 	switch sub {
 	case "probe":
-		rows, err := fyingest.Probe(ctx, s.ingest, s.store, s.client, s.pick(*names))
+		rows, err := fyingest.Probe(ctx, s.ingest, s.store, s.client, us)
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintln(w, "\ncheck\tsymbol\tvalue\tnote")
 		for _, r := range rows {
@@ -158,25 +192,26 @@ func runFyers(ctx context.Context, sub string, args []string) error {
 		return err
 	case "index":
 		if f.IsZero() {
-			f = market.Date{Year: 2017, Month: time.July, Day: 3}
+			f = fyingest.IndexFrom
 		}
-		for _, u := range s.pick(*names) {
+		for _, u := range us {
 			if _, err := fyingest.Index(ctx, s.ingest, s.store, s.client, u, f); err != nil {
 				return fmt.Errorf("%s: %w", u.Name, err)
 			}
 		}
 		return nil
 	case "backfill":
-		for _, u := range s.pick(*names) {
+		for _, u := range us {
 			if err := fyingest.Backfill(ctx, s.ingest, s.store, s.client, u, f, t); err != nil {
 				return err
 			}
 		}
 		return nil
 	case "update":
-		return fyingest.Update(ctx, s.ingest, s.store, s.client, s.pick(*names), s.cfg.Segments)
+		return fyingest.Update(ctx, s.ingest, s.store, s.client, us, s.cfg.Segments)
+	case "all":
+		return runFyersAll(ctx, s, us)
 	case "lot":
-		us := s.pick(*names)
 		if *names == "" || len(us) != 1 || f.IsZero() || *size <= 0 {
 			return errors.New("usage: serene fyers lot --underlying NAME --from DATE --size N")
 		}

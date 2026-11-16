@@ -84,8 +84,10 @@ const usage = `serene researches and trades Indian index options.
   serene equities daily       [--data DIR]
 
   serene fyers probe          [--underlying A,B] [--config configs/fyers.yaml]   (what history Fyers really serves; saves probe.parquet)
-  serene fyers index          [--underlying A,B] [--from 2017-07-03]   (1m and daily spot bars into F:/INSIGHTS/fyers)
-  serene fyers backfill       [--underlying A,B] [--from DATE] [--to DATE]   (expired options, 1m with OI; resumable)
+  serene fyers lots           (NSE/BSE F&O bhavcopies -> each expiry's lot, strikes and unadjusted price; universe.csv of every F&O stock since 2018)
+  serene fyers all            [--underlying A,B]   (everything: spot, then expired options and futures, indices then stocks; runs for days, waits out the daily cap and token expiry)
+  serene fyers index          [--underlying A,B] [--from 2017-10-01]   (1m and daily spot bars into /run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers)
+  serene fyers backfill       [--underlying A,B] [--from DATE] [--to DATE]   (expired options and futures, 1m with OI; resumable)
   serene fyers update         [--underlying A,B]   (daily: live lot sizes, new spot days, newly expired options)
   serene fyers lot            --underlying NAME --from DATE --size N   (record a lot size for expiries from DATE)
 
@@ -237,7 +239,7 @@ func run(ctx context.Context, args []string) error {
 		return runMCXFetch(ctx, rest)
 	case "etf fetch":
 		return runETFFetch(ctx, rest)
-	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot":
+	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot", "fyers lots", "fyers all":
 		return runFyers(ctx, args[1], rest)
 	case "forward signals":
 		return runForwardSignals(ctx, rest)
@@ -1240,7 +1242,7 @@ func settlementCloses(ctx context.Context, c config, spec analytics.Spec) (map[m
 	}
 	name, ok := settlementIndex[spec.Underlying]
 	if !ok {
-		return nil, fmt.Errorf("no settlement index for %s: set settlement to a Fyers store, e.g. F:/INSIGHTS/fyers", spec.Underlying)
+		return nil, fmt.Errorf("no settlement index for %s: set settlement to a Fyers store, e.g. /run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers", spec.Underlying)
 	}
 	rows, err := store.IndexDays(ctx, spec.From, spec.To)
 	if err != nil {

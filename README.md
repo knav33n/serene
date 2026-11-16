@@ -89,32 +89,59 @@ tried for that strategy.
 
 ## Fyers data
 
-Fyers holds expired NSE options (NIFTY, BANKNIFTY, stocks) from 2018-10-10 and
-SENSEX options from 2023-08-07, as 1-minute bars with OI. Everything it downloads
-goes to `F:/INSIGHTS/fyers` (`configs/fyers.yaml`), in the same Parquet layout as
-`data/upstox`. It needs the Prime plan; `plan: standard` in the config keeps to
-Standard's caps instead. Set `FYERS_APP_ID`, `FYERS_SECRET` and `FYERS_REDIRECT_URI`
-in `.env`, then log in with `serene auth`.
+Fyers holds expired options and futures as 1-minute bars with OI: NIFTY and
+stocks from 2018-10-25, FINNIFTY from 2021-01, MIDCPNIFTY from 2022-01,
+NIFTYNXT50 from 2024-05, BANKEX from 2023-07-28 and SENSEX from 2023-08.
+Everything goes to `/run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers`
+(`configs/fyers.yaml`), in the same Parquet layout as `data/upstox`. It needs
+the Prime plan; `plan: standard` keeps to Standard's caps instead. Set
+`FYERS_APP_ID`, `FYERS_SECRET` and `FYERS_REDIRECT_URI` in `.env`, then log in
+with `serene auth`.
 
 ```sh
-./serene fyers probe      # once: what history Fyers really serves (probe.parquet)
-./serene fyers index      # 1m and daily index bars from 2017; options pick strikes from them
-./serene fyers backfill   # expired options, newest expiry first; safe to rerun
-./serene fyers update     # daily after the close
+./serene fyers lots       # NSE/BSE F&O bhavcopies -> lots, strikes, prices, universe.csv
+./serene fyers all        # everything, for days: indices then every F&O stock since 2018
+./serene fyers probe      # what history Fyers really serves (probe.parquet)
+./serene fyers index      # 1m and daily spot bars from 2017-10
+./serene fyers backfill   # expired options and futures, newest expiry first; safe to rerun
+./serene fyers update     # daily after the close, after fyers lots (stocks need its fresh prices)
 ```
 
-The client stays under the plan's rate limits and stops on a rate-limit error,
-because Fyers blocks the account for the day after repeated breaches. Daily usage
-is kept in `fetch/usage.json`. Lot sizes come from `data/upstox` where it covers
-an expiry, and from the live symbol master going forward. For older expiries,
-add the size once, e.g. `serene fyers lot --underlying NIFTY --from 2018-10-01 --size 75`;
-backfill stops and says so when one is missing. To backtest, set both `data_dir`
-and `settlement` to `F:/INSIGHTS/fyers`. Expiries then settle at Fyers' daily
-index close, which is also the only settlement source for SENSEX.
+`fyers lots` reads what Fyers doesn't say from the exchanges' daily F&O files,
+kept under `bhav_fo/`:
+
+- **Lots.** UDiFF files (NSE from 2024-07-08, BSE from 2024-01) state each
+  contract's lot. Before that, NSE's market activity report gives each future's
+  traded quantity and contracts, whose ratio is the lot (`nse_mkt`), and weekly
+  options take their monthly's. A turnover estimate (`nse_derived`) is the last
+  resort, and SENSEX 10 / BANKEX 15 are assumed before BSE's archive (`manual`).
+  Upstox's exact lots win where `data/upstox` has them. Every lot row records
+  its source.
+- **Universe.** `universe.csv` lists every stock with options on any day since
+  2018-10, including those since dropped or delisted, which `stocks_file` adds
+  to the download. Fyers no longer lists a delisted stock (HDFC, MINDTREE,
+  CADILAHC), but it still serves the contracts by ticker, so their expiries
+  and strikes come from the bhavcopy (`"source": "bhavcopy"` in the manifest).
+- **Prices.** Fyers' stock spot history is split-adjusted (IRCTC's 2021 spot
+  reads 740 against a future at 3,700), so a stock's strikes are chosen around
+  its unadjusted near-month future close from the bhavcopy. The stored stock
+  spot bars are still Fyers' adjusted ones; use the futures for an unadjusted
+  underlying.
+
+`fyers all` sleeps to the next day when the daily budget is spent. When the
+token expires (06:30 IST daily) it posts to Slack (`SLACK_TOKEN`,
+`SLACK_CHANNEL`) and resumes once `serene auth` has stored a new token. The
+client stays under the plan's rate limits and stops on a rate-limit error,
+because Fyers blocks the account for the day after repeated breaches; daily
+usage is kept in `fetch/usage.json`. An expiry with no known lot is skipped and
+left unfinished; `serene fyers lot --underlying NAME --from DATE --size N` adds
+one. Stocks are stored under a safe name (`M&M` as `M_M`). To backtest, set
+both `data_dir` and `settlement` to the Fyers directory. Expiries then settle at
+Fyers' daily index close, which is also the only settlement source for SENSEX.
 
 ## ETF data
 
-Daily and 1-minute history for every ETF traded on NSE, into `F:/INSIGHTS/etf`,
+Daily and 1-minute history for every ETF traded on NSE, into `/run/media/naveen/Seagate Expansion Drive/INSIGHTS/etf`,
 grouped by the country of the fund's holdings (`us`, `hongkong`, `india`). It
 needs a Kite or Upstox login from today, ideally both, and the bhavcopy store
 from `serene equities fetch`.

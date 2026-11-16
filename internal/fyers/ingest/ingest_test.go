@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"serene/internal/data"
+	"serene/internal/fobhav"
 	"serene/internal/fyers"
 	"serene/internal/market"
 )
@@ -95,9 +98,12 @@ func TestIndexThenBackfill(t *testing.T) {
 	if _, err := Index(ctx, cfg, store, c, u, d(2024, 12, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if err := Backfill(ctx, cfg, store, c, u, d(2025, 1, 1), d(2025, 1, 31)); err == nil ||
-		!strings.Contains(err.Error(), "no lot size") {
+	// Without a lot size the expiry is skipped and left unfinished.
+	if err := Backfill(ctx, cfg, store, c, u, d(2025, 1, 1), d(2025, 1, 31)); err != nil {
 		t.Fatalf("backfill without a lot size: %v", err)
+	}
+	if ok, _ := readJSON(filepath.Join(dir, "fetch", "NIFTY", "2025-01-09.json"), &ExpiryRecord{}); ok {
+		t.Fatal("an expiry without a lot size was marked finished")
 	}
 	if err := store.PutLots(ctx, "NIFTY", []data.Lot{{From: d(2024, 11, 20), Size: 75, Source: "manual"}}); err != nil {
 		t.Fatal(err)
@@ -167,5 +173,87 @@ func TestLotOn(t *testing.T) {
 		if got, ok := data.LotOn(lots, c.e); got != c.want || ok != c.ok {
 			t.Errorf("%s: %d %v", c.e, got, ok)
 		}
+	}
+}
+
+// TestBackfillFromBhavcopy covers a stock Fyers no longer lists: expiries,
+// strikes, prices and lots come from the bhavcopy, the contracts are fetched
+// by constructed ticker, and a strike Fyers never carried just has no bars.
+func TestBackfillFromBhavcopy(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	expiry := d(2019, 1, 31)
+	h := http.NewServeMux()
+	h.HandleFunc("/history/fno/expired/expiry-dates", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"s":"error","code":-50,"message":"Invalid input"}`)
+	})
+	var asked []string
+	var mu sync.Mutex
+	h.HandleFunc("/history/fno/expired/historical-data", func(w http.ResponseWriter, r *http.Request) {
+		sym := r.URL.Query().Get("symbol")
+		mu.Lock()
+		asked = append(asked, sym)
+		mu.Unlock()
+		if sym == "NSE:M&M19JAN740CE" {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			fmt.Fprint(w, `{"s":"error","code":-50,"message":"Invalid input"}`)
+			return
+		}
+		ts := expiry.At(9, 15).Unix()
+		fmt.Fprintf(w, `{"s":"ok","columns":["timestamp","open","high","low","close","volume","open_interest"],"candles":[[%d,10,10,10,10,5,100]]}`, ts)
+	})
+	s := httptest.NewServer(h)
+	defer s.Close()
+	lim, _ := fyers.NewLimiter(fyers.Limits{Name: "t", PerSecond: 1000, PerMinute: 100000, PerDay: 100000}, "")
+	c := fyers.New("APP-100", "tok", lim)
+	c.DataURL, c.Backoff = s.URL, time.Millisecond
+
+	sym := fobhav.Symbol{Symbol: "M&M", Exchange: "NSE", First: "2018-12-01", Last: "2019-01-31",
+		Closes: map[string]float64{"2019-01-10": 700, "2019-01-24": 710},
+		Expiries: []fobhav.Expiry{{Expiry: "2019-01-31", Lot: 1000, LotSource: fobhav.SourceDerived,
+			Calls: []float64{500, 700, 740}, Puts: []float64{700}, Future: true}}}
+	b, _ := json.Marshal(sym)
+	if err := os.MkdirAll(filepath.Join(dir, "bhav_fo", "derived"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bhav_fo", "derived", "M&M.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := data.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := Config{Dir: dir, BandPct: 5, Workers: 2, Log: t.Logf, Now: func() time.Time { return d(2026, 1, 1).At(12, 0) }}
+	u := fyers.Lookup("M&M")
+	if u.Name != "M_M" || u.Exch() != "M&M" {
+		t.Fatalf("lookup %+v", u)
+	}
+	if err := Backfill(ctx, cfg, store, c, u, d(2018, 1, 1), d(2026, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := store.Contracts(ctx, "M_M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]int64{}
+	for _, c := range cs {
+		keys[c.Key()] = c.LotSize
+	}
+	// 500 is outside the band, 740 has no data; the future is kept.
+	if len(keys) != 3 || keys["NFO:M_M:2019-01-31:700:CE"] != 1000 || keys["NFO:M_M:2019-01-31:700:PE"] != 1000 {
+		t.Fatalf("contracts %v (asked %v)", keys, asked)
+	}
+	var rec ExpiryRecord
+	if ok, err := readJSON(filepath.Join(dir, "fetch", "M_M", "2019-01-31.json"), &rec); !ok || err != nil {
+		t.Fatalf("manifest %v %v", ok, err)
+	}
+	if rec.Source != "bhavcopy" || rec.Listed != 4 || len(rec.Contracts) != 4 {
+		t.Fatalf("manifest %+v", rec)
+	}
+	lots, err := store.Lots(ctx, "M_M")
+	if err != nil || len(lots) != 1 || lots[0].Source != fobhav.SourceDerived {
+		t.Fatalf("lots %v %v", lots, err)
 	}
 }
