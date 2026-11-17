@@ -143,7 +143,10 @@ func (f *fake) fill(id string, qty int64, price float64) {
 func (f *fake) last() string { return f.log[len(f.log)-1] }
 
 func cfg() Config {
-	return Config{Strategy: paper.DefaultHMARetest(day), Capital: market.Rupees(100000), MaxQty: 1755, Buffer: 0.08}
+	// The fixtures cross before 09:30, so the 09:30 gate is off here.
+	sc := paper.DefaultHMARetest(day)
+	sc.FirstEntry, sc.FirstArm = 0, 0
+	return Config{Strategy: sc, Capital: market.Rupees(100000), MaxQty: 1755, Buffer: 0.08}
 }
 
 func step(t *testing.T, f *fake, st *State, now time.Time, legs ...paper.Leg) []Event {

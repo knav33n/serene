@@ -31,14 +31,21 @@ type Config struct {
 	Slow      int           // 34; the buy limit rests on it
 	SwingK    int           // a swing low is below this many bars each side
 	LastEntry time.Duration // after the open: no arms or fills from then
-	Exit      time.Duration // after the open: the time exit, at that bar's open
-	Capital   market.Paise
-	Tick      market.Paise
+	// FirstEntry and FirstArm, after the open, are when fills and arms may
+	// start: a cross on a bar closing before FirstArm doesn't arm, and no
+	// limit fills in a bar starting before FirstEntry. Zero allows both from
+	// the first bar.
+	FirstEntry, FirstArm time.Duration
+	Exit                 time.Duration // after the open: the time exit, at that bar's open
+	Capital              market.Paise
+	Tick                 market.Paise
 }
 
-// DefaultHMARetest is the paper-trading configuration agreed on 2026-11-12.
+// DefaultHMARetest is the configuration agreed on 2026-11-12, with crosses
+// before 09:30 ignored from 2026-11-17.
 func DefaultHMARetest(d market.Date) Config {
 	return Config{Day: d, Fast: 13, Slow: 34, SwingK: 2,
+		FirstEntry: 15 * time.Minute, FirstArm: 15 * time.Minute, // 09:30
 		LastEntry: 5*time.Hour + 45*time.Minute, // 15:00
 		Exit:      6 * time.Hour,                // 15:15
 		Capital:   market.Rupees(100000), Tick: 5}
@@ -110,6 +117,7 @@ func entry(l Leg, cfg Config) (*Trade, error) {
 	t0 := today(bars, cfg.Day)
 	open := market.NSESession.Open(cfg.Day)
 	lastEntry := open.Add(cfg.LastEntry)
+	firstEntry, firstArm := open.Add(cfg.FirstEntry), open.Add(cfg.FirstArm)
 	ef, es := indicator.HMA(bars, cfg.Fast), indicator.HMA(bars, cfg.Slow)
 	lows := swing.PivotLows(bars, cfg.SwingK)
 	var armed bool
@@ -119,7 +127,7 @@ func entry(l Leg, cfg Config) (*Trade, error) {
 		if !b.Time.Before(lastEntry) {
 			break
 		}
-		if armed && !math.IsNaN(es[i-1]) {
+		if armed && !math.IsNaN(es[i-1]) && !b.Time.Before(firstEntry) {
 			limit := floorTick(market.Rupees(es[i-1]), cfg.Tick)
 			if b.Low <= limit {
 				price := min(limit, b.Open)
@@ -140,7 +148,7 @@ func entry(l Leg, cfg Config) (*Trade, error) {
 		switch {
 		case !above:
 			armed = false
-		case !(ef[i-1] > es[i-1]):
+		case !(ef[i-1] > es[i-1]) && !b.End.Before(firstArm):
 			armed, armedAt = true, b.Time
 		}
 	}
@@ -216,7 +224,8 @@ type Arm struct {
 // Arms returns each leg armed after its last bar, by the replay's rules, for
 // live orders. Unlike the replay, a touch of the limit doesn't use up an arm:
 // a live order the touch didn't fill keeps resting. A leg with no swing low
-// below the limit yet is left out, and nothing is armed from cfg.LastEntry.
+// below the limit yet is left out, and nothing is armed before cfg.FirstEntry
+// or from cfg.LastEntry.
 func Arms(legs []Leg, cfg Config) []Arm {
 	var out []Arm
 	for _, l := range legs {
@@ -226,7 +235,8 @@ func Arms(legs []Leg, cfg Config) []Arm {
 		if n < 2 || t0 >= n {
 			continue
 		}
-		if !bars[n-1].End.Before(market.NSESession.Open(cfg.Day).Add(cfg.LastEntry)) {
+		open := market.NSESession.Open(cfg.Day)
+		if !bars[n-1].End.Before(open.Add(cfg.LastEntry)) || bars[n-1].End.Before(open.Add(cfg.FirstEntry)) {
 			continue
 		}
 		ef, es := indicator.HMA(bars, cfg.Fast), indicator.HMA(bars, cfg.Slow)
@@ -239,7 +249,7 @@ func Arms(legs []Leg, cfg Config) []Arm {
 			switch {
 			case !(ef[i] > es[i]):
 				armed = false
-			case !(ef[i-1] > es[i-1]):
+			case !(ef[i-1] > es[i-1]) && !bars[i].End.Before(open.Add(cfg.FirstArm)):
 				armed, armedAt = true, bars[i].Time
 			}
 		}

@@ -67,6 +67,7 @@ const usage = `serene researches and trades Indian index options.
   serene research mcxemafwd   [--to DATE] [--judge] [--replay]   (frozen GOLDM 15m 13/34, sessions from 2026-11-11)
   serene research silvermfwd  [--strategy silverm_ema_15m|silverm_hma_1h] [--to DATE] [--judge] [--replay]   (frozen GOLDM rules on SILVERM, sessions from 2026-11-12)
   serene research mcxdow      [--names A,B] [--from DATE] [--to DATE] [--frame 1h] [--lookback 720h] [--multiple 2.5] [--slip-ticks 1] [--trades FILE]
+  serene research hmaretest   [--from DATE] [--to DATE] [--unseal] [--slip-bps 30] [--step 100] [--trades FILE]
   serene research pdbreak     [--from DATE] [--to DATE] [--split 2025-09-01] [--offset-pct 1] [--slip-bps 30] [--trades FILE]
   serene research pdlswing    [--from DATE] [--to DATE] [--split 2025-09-01] [--draws 200] [--slip-bps 30] [--trades FILE]   (PDL-break put swing, 3-day hold)
   serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
@@ -193,6 +194,8 @@ func run(ctx context.Context, args []string) error {
 		return runEMACross(ctx, rest)
 	case "research pdbreak":
 		return runPDBreak(ctx, rest)
+	case "research hmaretest":
+		return runHMARetestBacktest(ctx, rest)
 	case "research pdlswing":
 		return runPDLSwing(ctx, rest)
 	case "research mcxcloud":
