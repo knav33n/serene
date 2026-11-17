@@ -1,5 +1,5 @@
 [Unit]
-Description=serene nifty_hma_retest: paper trade and real orders on Zerodha and Upstox, to Slack
+Description=serene nifty_hma_retest: paper trade and real orders on Zerodha, to Slack
 Wants=network-online.target
 After=network-online.target postgresql.service
 
@@ -8,5 +8,5 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-ExecStart=/home/serene/app/serene paper hmaretest --slack --live zerodha,upstox
+ExecStart=/home/serene/app/serene paper hmaretest --slack --live zerodha
 TimeoutStartSec=5min
