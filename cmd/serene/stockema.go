@@ -116,6 +116,16 @@ func crossRun(days []data.PanelDay, fast, slow []float64, lo, hi int, side float
 // readSymbols reads the Symbol column of a niftyindices constituent file,
 // skipping # comment lines.
 func readSymbols(path string) ([]string, error) {
+	cols, err := readListColumns(path, "Symbol")
+	if err != nil {
+		return nil, err
+	}
+	return cols[0], nil
+}
+
+// readListColumns reads the named columns of a niftyindices constituent
+// file, skipping # comment lines; cols[k][i] is column k of row i.
+func readListColumns(path string, names ...string) ([][]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -135,18 +145,20 @@ func readSymbols(path string) ([]string, error) {
 	if err != nil || len(rows) == 0 {
 		return nil, fmt.Errorf("%s: %v", path, err)
 	}
-	col := -1
-	for i, h := range rows[0] {
-		if strings.EqualFold(strings.TrimSpace(h), "Symbol") {
-			col = i
+	out := make([][]string, len(names))
+	for k, name := range names {
+		col := -1
+		for i, h := range rows[0] {
+			if strings.EqualFold(strings.TrimSpace(h), name) {
+				col = i
+			}
 		}
-	}
-	if col < 0 {
-		return nil, fmt.Errorf("%s: no Symbol column", path)
-	}
-	var out []string
-	for _, r := range rows[1:] {
-		out = append(out, strings.TrimSpace(r[col]))
+		if col < 0 {
+			return nil, fmt.Errorf("%s: no %s column", path, name)
+		}
+		for _, r := range rows[1:] {
+			out[k] = append(out[k], strings.TrimSpace(r[col]))
+		}
 	}
 	return out, nil
 }

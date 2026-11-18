@@ -72,12 +72,15 @@ const usage = `serene researches and trades Indian index options.
   serene research pdlswing    [--from DATE] [--to DATE] [--split 2025-09-01] [--draws 200] [--slip-bps 30] [--trades FILE]   (PDL-break put swing, 3-day hold)
   serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
   serene research stockdiv    [--from 2005-01-01] [--to 2022-12-31] [--top 200] [--cost-pct 0.24] [--slip-bps 10] [--data DIR]
+  serene research leaders     [--top 500] [--pick 20] [--weak-pct 10] [--split 2020-01-01]   (backtest of the market leaders screen, point-in-time universe)
   serene research stockema    [--list configs/nifty500.csv] [--short] [--from 2005-01-01] [--split 2019-01-01] [--to 2022-12-31] [--cost-pct 0.24] [--out reports/nifty500_ema.csv]   (daily EMA crosses per stock)
 
   serene market fetch         [--from DATE] [--to DATE] [--rebuild] [--data DIR] [--catalog FILE]
   serene market report        [--date DATE] [--data DIR] [--catalog FILE] [--reports DIR]
   serene market daily         [--slack] [--data DIR] [--catalog FILE] [--reports DIR]
   serene market check         [--data DIR] [--catalog FILE]
+  serene market leaders       [--date DATE] [--bench "NIFTY Smallcap 100"] [--list configs/nifty500.csv] [--fundamentals leaders|all|off] [--slack]   (sectors and Nifty 500 stocks near highs while small caps are off theirs)
+  serene market comb          [--scans fipa,cepa] [--zone-pct 10] [--roe 15] [--roce 15] [--assets-pct 30] [--slack]   (weekly FIPA/CEPA lists: Kite price rules + Upstox annual fundamentals, to SLACK_SCANS_CHANNEL)
 
   serene equities fetch       [--from DATE] [--to DATE] [--rebuild] [--data DIR]
   serene equities check       [--symbols A,B] [--from DATE] [--to DATE] [--data DIR]
@@ -94,7 +97,7 @@ const usage = `serene researches and trades Indian index options.
 
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
-  serene etf fetch            [--symbols A,B] [--dir F:/INSIGHTS/etf] [--data data/equities]   (every NSE ETF, daily and 1m; resumable)
+  serene etf fetch            [--symbols A,B] [--dir /run/media/naveen/Seagate Expansion Drive/INSIGHTS/etf] [--data data/equities]   (every NSE ETF, daily and 1m; resumable)
 
   serene paper hmaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_hma_retest; entries/exits with P&L)
   serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
@@ -188,6 +191,8 @@ func run(ctx context.Context, args []string) error {
 		return runGrid(ctx, rest)
 	case "research stockdiv":
 		return runStockDiv(ctx, rest)
+	case "research leaders":
+		return runLeadersBacktest(ctx, rest)
 	case "research stockema":
 		return runStockEMA(ctx, rest)
 	case "research emacross":
@@ -224,6 +229,10 @@ func run(ctx context.Context, args []string) error {
 		return runDayFeatures(ctx, rest)
 	case "market fetch":
 		return runMarketFetch(ctx, rest)
+	case "market leaders":
+		return runMarketLeaders(ctx, rest)
+	case "market comb":
+		return runMarketComb(ctx, rest)
 	case "market report":
 		return runMarketReport(ctx, rest)
 	case "market daily":
@@ -1066,7 +1075,17 @@ func runAuth(ctx context.Context, args []string) error {
 	}
 	base := "http://" + *addr
 	providers := auth.ProvidersFromEnv(base)
-	srv := &auth.Server{Addr: *addr, Providers: providers, Store: store, UI: web.Dist(),
+	// Kite and Upstox are logged in each morning in project_calm; take its
+	// sessions when newer, so only brokers it lacks (Fyers) need a login here.
+	if url := os.Getenv("CALM_DATABASE_URL"); url != "" && sub != "logout" {
+		updated, err := auth.ImportCalm(ctx, url, store)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "project_calm logins not copied:", err)
+		} else if len(updated) > 0 {
+			fmt.Println("copied from project_calm:", strings.Join(updated, ", "))
+		}
+	}
+	srv :=&auth.Server{Addr: *addr, Providers: providers, Store: store, UI: web.Dist(),
 		Grace: 30 * time.Second, Idle: 10 * time.Minute}
 
 	switch sub {

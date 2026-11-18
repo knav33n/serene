@@ -1,6 +1,8 @@
 /serene
-/data/
+/data
+/data.local/
 /reports/
+/logs/
 *.env
 .env*
 secrets*
