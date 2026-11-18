@@ -3,7 +3,8 @@ plan: prime # prime or standard: sets the request caps the client stays under
 dir: "/run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers" # every Fyers file goes here; market data lives under data/ (-> MARKET_DATA)
 upstox_dir: data/upstox # read only, for exact lot sizes of expiries it covers
 band_pct: 5 # keep strikes this far outside the index's range in the 30 days before expiry
-workers: 8 # contracts fetched at once, all under one rate limiter (4 reached ~200 req/min of the 450 allowed)
+workers: 2 # contracts fetched at once, all under one rate limiter (3 at 9/s was refused in the first second on 2026-11-18)
+per_second: 3 # below Prime's 9: expired intraday is refused in bursts; 1 worker at <=3/s and 2 workers passed 300+ requests
 
 # Indices are known by name (see Indices in internal/fyers/symbol.go). Any
 # other name is an NSE stock, fetched as NSE:<NAME>-EQ.

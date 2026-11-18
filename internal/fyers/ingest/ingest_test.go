@@ -257,3 +257,57 @@ func TestBackfillFromBhavcopy(t *testing.T) {
 		t.Fatalf("lots %v %v", lots, err)
 	}
 }
+
+// TestContractHistoryBrokenDay: Fyers fails (code -99) on any range holding
+// one bad day; the fetch narrows down to that day, leaves it out and keeps
+// every other day.
+func TestContractHistoryBrokenDay(t *testing.T) {
+	expiry, bad := d(2025, 1, 30), d(2025, 1, 22)
+	h := http.NewServeMux()
+	var calls atomic.Int32
+	h.HandleFunc("/history/fno/expired/historical-data", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		q := r.URL.Query()
+		from, _ := market.ParseDate(q.Get("range_from"))
+		to, _ := market.ParseDate(q.Get("range_to"))
+		if !bad.Before(from) && !to.Before(bad) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			fmt.Fprint(w, `{"s":"error","code":-99,"message":"Something went wrong. Please contact support"}`)
+			return
+		}
+		var rows []string
+		for day := expiry.AddDays(-13); !expiry.Before(day); day = day.AddDays(1) {
+			if !day.Before(from) && !to.Before(day) && day.Weekday() != time.Saturday && day.Weekday() != time.Sunday {
+				rows = append(rows, fmt.Sprintf("[%d,10,10,10,10,5,100]", day.At(9, 15).Unix()))
+			}
+		}
+		fmt.Fprintf(w, `{"s":"ok","candles":[%s]}`, strings.Join(rows, ","))
+	})
+	s := httptest.NewServer(h)
+	defer s.Close()
+	lim, _ := fyers.NewLimiter(fyers.Limits{Name: "t", PerSecond: 1000, PerMinute: 100000, PerDay: 100000}, "")
+	c := fyers.New("APP-100", "tok", lim)
+	c.DataURL, c.Backoff = s.URL, time.Millisecond
+
+	cs, broken, err := contractHistory(context.Background(), c, "NSE:NIFTY25JAN22000CE", expiry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if broken != 1 {
+		t.Errorf("broken days = %d, want 1", broken)
+	}
+	if len(cs) != 9 { // 10 weekdays from 01-17 to 01-30, less the bad one
+		t.Errorf("got %d candles, want 9", len(cs))
+	}
+	for i, x := range cs {
+		if market.DateOf(x.Time) == bad {
+			t.Errorf("candle on the broken day %s", bad)
+		}
+		if i > 0 && !cs[i-1].Time.Before(x.Time) {
+			t.Errorf("candles out of order at %d", i)
+		}
+	}
+	if n := calls.Load(); n > 20 {
+		t.Errorf("%d requests to isolate one day", n)
+	}
+}

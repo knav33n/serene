@@ -30,6 +30,10 @@ var (
 	// range before a series starts and for a symbol it doesn't know, such as a
 	// delisted stock's spot or a strike that never listed.
 	ErrNoData = errors.New("fyers has no such data")
+	// ErrBroken is Fyers' code -99 "Something went wrong", which it returns
+	// every time for some ranges of some expired contracts: retrying the same
+	// request can't help, though a narrower range may.
+	ErrBroken = errors.New("fyers fails on this range")
 )
 
 // Client calls the Fyers data APIs through a shared limiter.
@@ -41,6 +45,8 @@ type Client struct {
 	Limiter   *Limiter
 	Backoff   time.Duration
 	HTTP      *http.Client
+	// OnRetry, if set, hears each error that is about to be retried.
+	OnRetry func(path string, try int, err error)
 }
 
 // New returns a client. The limiter is shared by every goroutine using it.
@@ -77,6 +83,9 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, expiredIntr
 			return err
 		}
 		last = err
+		if c.OnRetry != nil && try+1 < attempts {
+			c.OnRetry(path, try+1, err)
+		}
 	}
 	return fmt.Errorf("gave up after %d tries: %w", attempts, last)
 }
@@ -119,6 +128,8 @@ func (c *Client) once(ctx context.Context, path string, q url.Values, expiredInt
 		return true, fmt.Errorf("unreadable response (HTTP %d): %w", resp.StatusCode, jsonErr)
 	case env.S == "no_data":
 		return false, json.Unmarshal(body, out)
+	case env.Code == -99:
+		return false, fmt.Errorf("%w: HTTP %d code %d %s", ErrBroken, resp.StatusCode, env.Code, env.Message)
 	case env.Code == -50:
 		return false, fmt.Errorf("%w: HTTP %d code %d %s", ErrNoData, resp.StatusCode, env.Code, env.Message)
 	case resp.StatusCode != http.StatusOK || env.S != "ok":

@@ -89,6 +89,8 @@ type ContractRecord struct {
 	Key     string `json:"key"`
 	Bars    int    `json:"bars"`
 	Dropped int    `json:"dropped"` // candles outside the session
+	// BrokenDays are days Fyers fails on (code -99) every time, left out.
+	BrokenDays int `json:"broken_days,omitempty"`
 }
 
 func stateDir(cfg Config, u fyers.Underlying) string { return filepath.Join(cfg.Dir, "fetch", u.Name) }
@@ -544,15 +546,19 @@ func fetchExpiry(ctx context.Context, cfg Config, store *data.Store, c *fyers.Cl
 	for range workers {
 		wg.Go(func() {
 			for i := range next {
-				cs, err := contractHistory(ctx, c, jobs[i].ticker, e)
+				cs, broken, err := contractHistory(ctx, c, jobs[i].ticker, e)
 				if err != nil {
 					errs[i] = fmt.Errorf("%s: %w", jobs[i].ticker, err)
 					cancel()
 					continue
 				}
+				if broken > 0 {
+					cfg.Log("%s %s: left out %d days Fyers fails on", jobs[i].ticker, e, broken)
+				}
 				b, dropped := toBars(jobs[i].inst.Key(), cs)
 				barsOf[i] = b
-				results[i] = ContractRecord{Ticker: jobs[i].ticker, Key: jobs[i].inst.Key(), Bars: len(b), Dropped: dropped}
+				results[i] = ContractRecord{Ticker: jobs[i].ticker, Key: jobs[i].inst.Key(), Bars: len(b), Dropped: dropped,
+					BrokenDays: broken}
 			}
 		})
 	}
@@ -595,25 +601,56 @@ func fetchExpiry(ctx context.Context, cfg Config, store *data.Store, c *fyers.Cl
 // contractHistory walks back from expiry in 100-day windows, stopping once a
 // window holds no data from its first days: the contract wasn't listed yet.
 // A ticker Fyers doesn't know, such as a bhavcopy strike it never carried,
-// has no bars.
-func contractHistory(ctx context.Context, c *fyers.Client, ticker string, e market.Date) ([]fyers.Candle, error) {
+// has no bars. It also returns how many days were left out because Fyers
+// fails on them every time.
+func contractHistory(ctx context.Context, c *fyers.Client, ticker string, e market.Date) ([]fyers.Candle, int, error) {
 	var out []fyers.Candle
+	broken := 0
 	to := e
 	for {
 		from := to.AddDays(-(fyers.MaxIntradayDays - 1))
 		cs, err := c.ExpiredHistory(ctx, ticker, fyers.Minute, from, to)
+		if errors.Is(err, fyers.ErrBroken) {
+			cs, err = splitHistory(ctx, c, ticker, from, to, &broken)
+		}
 		if errors.Is(err, fyers.ErrNoData) {
-			return out, nil
+			return out, broken, nil
+		}
+		if err != nil {
+			return nil, broken, err
+		}
+		out = append(cs, out...)
+		if len(cs) == 0 || from.AddDays(5).Before(market.DateOf(cs[0].Time)) || from.Before(e.AddDays(-lookback)) {
+			return out, broken, nil
+		}
+		to = from.AddDays(-1)
+	}
+}
+
+// splitHistory fetches from..to in halves after Fyers failed on the whole
+// range, down to single days, and skips the days it still fails on.
+func splitHistory(ctx context.Context, c *fyers.Client, ticker string, from, to market.Date, broken *int) ([]fyers.Candle, error) {
+	days := int(to.At(12, 0).Sub(from.At(12, 0)).Hours()/24) + 1
+	if days <= 1 {
+		*broken++
+		return nil, nil
+	}
+	mid := from.AddDays(days/2 - 1)
+	var out []fyers.Candle
+	for _, w := range [][2]market.Date{{from, mid}, {mid.AddDays(1), to}} {
+		cs, err := c.ExpiredHistory(ctx, ticker, fyers.Minute, w[0], w[1])
+		if errors.Is(err, fyers.ErrBroken) {
+			cs, err = splitHistory(ctx, c, ticker, w[0], w[1], broken)
+		}
+		if errors.Is(err, fyers.ErrNoData) {
+			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		out = append(cs, out...)
-		if len(cs) == 0 || from.AddDays(5).Before(market.DateOf(cs[0].Time)) || from.Before(e.AddDays(-lookback)) {
-			return out, nil
-		}
-		to = from.AddDays(-1)
+		out = append(out, cs...)
 	}
+	return out, nil
 }
 
 // Update is the daily job: extend each spot series, record the live contracts'

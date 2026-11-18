@@ -26,13 +26,16 @@ type fyersConfig struct {
 	Plan string `yaml:"plan"`
 	// ExpiredPerDay caps expired-contract intraday requests a day, for the
 	// limit Fyers enforces below its published Prime caps; 0 keeps the plan's.
-	ExpiredPerDay int      `yaml:"expired_per_day"`
-	Dir           string   `yaml:"dir"`
-	UpstoxDir     string   `yaml:"upstox_dir"`
-	BandPct       float64  `yaml:"band_pct"`
-	Workers       int      `yaml:"workers"`
-	Underlyings   []string `yaml:"underlyings"`
-	Stocks        []string `yaml:"stocks"`
+	ExpiredPerDay int `yaml:"expired_per_day"`
+	// PerSecond lowers the plan's per-second cap: expired intraday requests
+	// are refused in bursts well under Prime's published 10/s.
+	PerSecond   int      `yaml:"per_second"`
+	Dir         string   `yaml:"dir"`
+	UpstoxDir   string   `yaml:"upstox_dir"`
+	BandPct     float64  `yaml:"band_pct"`
+	Workers     int      `yaml:"workers"`
+	Underlyings []string `yaml:"underlyings"`
+	Stocks      []string `yaml:"stocks"`
 	// StocksFile adds every stock in a universe.csv that serene fyers lots
 	// writes: each stock with options on any day since 2018-10, delisted too.
 	StocksFile string   `yaml:"stocks_file"`
@@ -96,6 +99,9 @@ func openFyers(ctx context.Context, configPath string, needToken bool) (*fyersSe
 	if cfg.ExpiredPerDay > 0 {
 		limits.ExpiredIntraday = cfg.ExpiredPerDay
 	}
+	if cfg.PerSecond > 0 && cfg.PerSecond < limits.PerSecond {
+		limits.PerSecond = cfg.PerSecond
+	}
 	lim, err := fyers.NewLimiter(limits, filepath.Join(cfg.Dir, "fetch", "usage.json"))
 	if err != nil {
 		return nil, err
@@ -121,7 +127,9 @@ func openFyers(ctx context.Context, configPath string, needToken bool) (*fyersSe
 	if err != nil {
 		return nil, err
 	}
-	return &fyersSession{cfg: cfg, store: store, client: fyers.New(appID, token, lim),
+	client := fyers.New(appID, token, lim)
+	client.OnRetry = func(path string, try int, err error) { stamp("retry %d %s: %v", try, path, err) }
+	return &fyersSession{cfg: cfg, store: store, client: client,
 		ingest: fyingest.Config{Dir: cfg.Dir, UpstoxDir: cfg.UpstoxDir, BandPct: cfg.BandPct,
 			Workers: cfg.Workers, Log: stamp}}, nil
 }
