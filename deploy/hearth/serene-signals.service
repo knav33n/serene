@@ -1,5 +1,5 @@
 [Unit]
-Description=serene forward-test signals (goldm_ema_15m, goldm_hma_1h, silverm_ema_15m, silverm_hma_1h) to Slack
+Description=serene forward-test signals (goldm_ema_15m, goldm_hma_1h, silverm_ema_15m, silverm_hma_1h) to Slack, and live one-lot Zerodha orders for the two HMA strategies
 Wants=network-online.target
 After=network-online.target postgresql.service
 
@@ -8,5 +8,7 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-ExecStart=/home/serene/app/serene forward signals --fetch --slack --strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h
+# "-": a failed signal post must not stop the live orders, which check their own bars are fresh.
+ExecStart=-/home/serene/app/serene forward signals --fetch --slack --strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h
+ExecStart=/home/serene/app/serene live mcx --slack --strategies goldm_hma_1h,silverm_hma_1h
 TimeoutStartSec=10min

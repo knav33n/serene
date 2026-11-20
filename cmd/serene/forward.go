@@ -328,6 +328,27 @@ func emaCrossFirstSignals(ctx context.Context, path string) ([]fwdSignal, error)
 // trade's "end" exit is only where the data stops, so it is left out: that
 // position is still open.
 func mcxSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal, error) {
+	ts, err := mcxTrades(ctx, dir, costsFile, strat)
+	if err != nil {
+		return nil, err
+	}
+	var out []fwdSignal
+	for _, t := range ts {
+		name := t.Key
+		if in, err := market.ParseKey(t.Key); err == nil {
+			name = fmt.Sprintf("%s FUT (exp %s)", in.Underlying, in.Expiry)
+		}
+		out = append(out, fwdSignal{Strategy: strat, Time: t.Entry, Side: t.Side, Instrument: name, Price: t.In, Note: "enter"})
+		if t.Reason != "end" {
+			out = append(out, fwdSignal{Strategy: strat, Time: t.Exit, Side: -t.Side, Instrument: name, Price: t.Out, Note: "exit, " + t.Reason})
+		}
+	}
+	return out, nil
+}
+
+// mcxTrades replays a frozen MCX forward test from its start to the last
+// fetched bar. The last trade, if it ends "end", is the position held now.
+func mcxTrades(ctx context.Context, dir, costsFile, strat string) ([]mcx.Trade, error) {
 	name, start := gemName, gemForward
 	if strat == "goldm_hma_1h" {
 		start = ghmForward
@@ -370,22 +391,7 @@ func mcxSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal,
 			return nil, err
 		}
 	}
-	ts, err := mcx.EMABacktest(mcx.PrepareEMA(bars[name], frame), cfg)
-	if err != nil {
-		return nil, err
-	}
-	var out []fwdSignal
-	for _, t := range ts {
-		name := t.Key
-		if in, err := market.ParseKey(t.Key); err == nil {
-			name = fmt.Sprintf("%s FUT (exp %s)", in.Underlying, in.Expiry)
-		}
-		out = append(out, fwdSignal{Strategy: strat, Time: t.Entry, Side: t.Side, Instrument: name, Price: t.In, Note: "enter"})
-		if t.Reason != "end" {
-			out = append(out, fwdSignal{Strategy: strat, Time: t.Exit, Side: -t.Side, Instrument: name, Price: t.Out, Note: "exit, " + t.Reason})
-		}
-	}
-	return out, nil
+	return mcx.EMABacktest(mcx.PrepareEMA(bars[name], frame), cfg)
 }
 
 func loadSent(path string) (map[string]bool, error) {

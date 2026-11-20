@@ -10,11 +10,27 @@ import (
 	"serene/internal/upstox"
 )
 
-// Zerodha trades through Kite, intraday (MIS). Symbols maps instrument keys
-// to Kite trading symbols.
+// Zerodha trades through Kite. Symbols maps instrument keys to Kite trading
+// symbols. Exchange and Product default to NFO and MIS (intraday options);
+// MCX futures held overnight use MCX and NRML.
 type Zerodha struct {
-	C       *kite.Client
-	Symbols map[string]string
+	C                 *kite.Client
+	Symbols           map[string]string
+	Exchange, Product string
+}
+
+func (z *Zerodha) exchange() string {
+	if z.Exchange == "" {
+		return "NFO"
+	}
+	return z.Exchange
+}
+
+func (z *Zerodha) product() string {
+	if z.Product == "" {
+		return "MIS"
+	}
+	return z.Product
 }
 
 func (z *Zerodha) Name() string { return "zerodha" }
@@ -29,7 +45,7 @@ func (z *Zerodha) req(o OrderReq) (kite.OrderRequest, error) {
 	if !ok {
 		return kite.OrderRequest{}, fmt.Errorf("no Kite symbol for %s", o.Instrument.Key())
 	}
-	return kite.OrderRequest{Exchange: "NFO", Symbol: sym, Side: sideName(o.Side), Type: o.Type, Product: "MIS",
+	return kite.OrderRequest{Exchange: z.exchange(), Symbol: sym, Side: sideName(o.Side), Type: o.Type, Product: z.product(),
 		Qty: o.Qty, Price: o.Price.Rupees(), Trigger: o.Trigger.Rupees(), Tag: o.Tag}, nil
 }
 
@@ -89,7 +105,7 @@ func (z *Zerodha) Position(ctx context.Context, in market.Instrument) (int64, er
 	}
 	var n int64
 	for _, p := range ps {
-		if p.Exchange == "NFO" && p.Symbol == z.Symbols[in.Key()] && p.Product == "MIS" {
+		if p.Exchange == z.exchange() && p.Symbol == z.Symbols[in.Key()] && p.Product == z.product() {
 			n += p.Qty
 		}
 	}
