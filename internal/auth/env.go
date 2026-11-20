@@ -46,7 +46,7 @@ func LoadDotEnv(path string) error {
 }
 
 // Brokers lists every broker in display order.
-var Brokers = []struct{ Name, Label string }{{"upstox", "Upstox"}, {"zerodha", "Zerodha"}, {"fyers", "Fyers"}}
+var Brokers = []struct{ Name, Label string }{{"upstox", "Upstox"}, {"zerodha", "Zerodha"}, {"breeze", "Breeze"}, {"fyers", "Fyers"}}
 
 // upstoxRedirect is sent on every Upstox login and must exactly match the URI
 // registered on the app. Zerodha takes its redirect from its console instead.
@@ -76,6 +76,9 @@ func ProvidersFromEnv(baseURL string) map[string]Provider {
 	}
 	if k, s := os.Getenv("FYERS_APP_ID"), os.Getenv("FYERS_SECRET"); k != "" && s != "" {
 		out["fyers"] = &Fyers{AppID: k, Secret: Secret(s), RedirectURI: fyersRedirect(baseURL)}
+	}
+	if k := os.Getenv("BREEZE_API_KEY"); k != "" {
+		out["breeze"] = &Breeze{APIKey: k}
 	}
 	return out
 }

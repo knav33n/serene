@@ -3,8 +3,8 @@
 Research and trade Indian index options in Go. Strategies are written once and
 run unchanged in backtests, and later on paper and live.
 
-**Status:** research works on synthetic data and real NIFTY options, and broker
-login works. Paper trading and live trading are not built yet, and those commands
+**Status:** research works on synthetic data and real NIFTY options, broker
+login works, and `serene manual` trades Nifty options by hand. Paper trading and live trading are not built yet, and those commands
 only return an error. See `docs/roadmap.md`.
 
 ## Quick start
@@ -24,18 +24,24 @@ it. Use it to test the system, never to judge an idea.
 
 ## Broker login
 
-Upstox and Zerodha tokens expire every morning (03:30 and 06:00 IST), so log in
-once a day. Tokens can place real orders, so they're encrypted with
-`SERENE_TOKEN_KEY` before being stored in Postgres, and never shown in the page,
-terminal or logs.
+Upstox, Zerodha and ICICI Breeze tokens expire every morning (03:30 and 06:00
+IST), so log in once a day. Tokens can place real orders, so they're encrypted
+with `SERENE_TOKEN_KEY` before being stored in Postgres, and never shown in the
+terminal or logs. `serene auth` serves the login page on 127.0.0.1:8080 and opens it.
+
+serene is the only place logins are made. project_calm no longer logs in: each
+login made here is also written into calm's `trading.broker_sessions`
+(`CALM_DATABASE_URL`, in the clear as calm keeps it), and Zerodha's and Upstox's
+are pushed to hearth, which stores them and writes them into hearth's calm.
 
 Setup:
 
 1. Copy `.env.example` to `.env` and fill it in.
 2. Register a redirect URL with each broker's app. With these, a login finishes
-   by itself while `serene auth` is running:
+   by itself while the page is open:
    - `http://127.0.0.1:8080/callback/upstox`
    - `http://127.0.0.1:8080/callback/zerodha`
+   - `http://127.0.0.1:8080/callback/breeze` (Breeze sends `apisession`)
 
    You can use another URL if you can copy the token from it. This project's
    Upstox app uses `https://httpbin.org/get`. For Upstox, set
@@ -49,22 +55,97 @@ Setup:
 Daily use:
 
 ```sh
-./serene auth                  # opens the login page
+./serene auth                  # the login page (--no-open: don't open the browser); Ctrl+C stops it
 ./serene auth status           # shows each login, never the token
 ./serene auth logout upstox    # revokes the token at the broker and deletes it
+./serene auth push zerodha     # sends a stored login to hearth again (--hearth=false: calm here only)
+./serene auth --hearth=false   # logs in without pushing to hearth
 ```
 
-On the page, **Log in** shows the broker's URL and a box. Open the URL, log in,
-then paste the token from the redirected URL (`code` for Upstox, `request_token`
-for Zerodha), or paste the whole URL. Paste it quickly: these tokens are short
-lived, and Upstox's works only once.
+The page says in one line which brokers still need today's login, and lists
+each one: who's logged in, how long the token has left (the bar under it), and
+where the login was sent. **Log in** opens the broker's page in a new tab. With a
+local redirect URL the login finishes by itself and that tab comes back to the
+page; otherwise paste the token from the redirected URL (`code` for Upstox,
+`request_token` for Zerodha, `apisession` for Breeze), or the whole URL, into
+the broker's row and press **Finish login**. Paste it quickly: these tokens are
+short lived, and Upstox's works only once. A Zerodha login between 06:00 and
+07:30 IST is refused before the token is spent: Zerodha's daily logout can still
+wipe it.
+
+After a Zerodha or Upstox login, serene pushes it to hearth through Systems
+Manager (AWS profile `iac`, `ap-south-1`): it seals the token with hearth's own
+`SERENE_TOKEN_KEY` (from `deploy/hearth/server.env`), so the command, which
+Systems Manager keeps in its history, never carries the token in the clear.
+hearth runs `serene auth put` with it, which stores it and writes it into
+hearth's calm. A push that fails leaves the local login in place and says to
+retry with **Send again** on the page, or `serene auth push`. Breeze and Fyers stay on this machine.
 
 Code gets a token with `auth.Load(ctx, store, "upstox")`. Trading should also
 check `Token.ValidThrough` so a token can't expire during the session.
 
+To run the Postgres tests, set `SERENE_TEST_DATABASE_URL`; they use a temporary
+schema.
+
+## Manual trades
+
+`serene manual` serves the manual trades page that used to be project_calm's
+(`internal/manual`, the page in `web/`). It places **real orders** on Zerodha,
+Upstox, Fyers and ICICI (Breeze), using the day's logins. Fyers and ICICI start
+unticked. ICICI takes no market orders: "at market" there is a LIMIT 5% through
+the LTP. Fyers has no charges API, so its rows show P&L without charges.
+
+- **Trade a Nifty strike.** Pick the expiry, strike, CE / PE, a limit price
+  (empty: at market), the target as a % net of charges, the capital, and the
+  brokers. Each broker buys as many lots as the capital covers, or its free
+  margin when that's less, after the broker's charges. The buy is split at the
+  freeze quantity, into at most 10 orders. What hasn't filled at the limit in
+  `--limit-wait` (60 s) is cancelled. The target is a resting LIMIT sell at the
+  price that nets the target after charges both ways. There's no stop, and the
+  product is intraday (MIS / I). At 15:20 the page squares off whatever manual
+  position is still open while it runs, and the broker does it if the page
+  isn't running.
+- **Open F&O positions** on both accounts, whoever opened them. **Exit**
+  cancels the contract's pending orders, then squares it off at market.
+- **Today's trades**, read live from each broker's tradebook. Each position has
+  its orders, the broker's P&L, its own charges (Kite's contract note, Upstox's
+  brokerage API) and net. **By** names the strategy from the order tag, with
+  `serenemanual` shown as manual and `hmr…` as nifty_hma_retest. A manual
+  trade shows its target and a **Sell now** button.
+
+Nothing is stored: a manual trade is a position whose orders carry the
+`serenemanual` tag. Nifty's contracts and the at-market LTP come from Upstox,
+and Kite's trading symbols from its instrument list.
+
+Locally there's no password. The server listens only on a loopback address and
+refuses anything else. It checks the Host header, and only takes JSON POSTs from
+its own origin.
+
+On hearth it's the home page, **https://hearth.naveenkumar.dev/**, behind a
+login: a password and a TOTP code from an authenticator app. `serene-manual`
+runs `serene manual --public=hearth.naveenkumar.dev --slack`, and host.sh points
+Caddy's unclaimed paths at it. The session cookie lasts until 06:00 IST. Five
+wrong tries lock the login for a minute, doubling up to 16. To set it up:
+
+1. `./serene manual setup` asks for the password and prints
+   `SERENE_MANUAL_PASSWORD` (a PBKDF2 hash) and `SERENE_MANUAL_TOTP`. Add the
+   TOTP key to the authenticator app.
+2. Put both, with `FYERS_APP_ID`, `BREEZE_API_KEY` and `BREEZE_API_SECRET`, in
+   `deploy/hearth/server.env`, then run `deploy/hearth/env.sh` and
+   `deploy/hearth/deploy.sh`.
+3. Each morning `serene auth` pushes the Zerodha, Upstox, Fyers and Breeze
+   logins to hearth (`serene auth push` again if one was missed).
+
+Changing the password, or SERENE_TOKEN_KEY, ends every session.
+
+```sh
+./serene manual                # http://127.0.0.1:8767
+./serene manual --slack        # also posts buys and square-offs to SLACK_CHANNEL
+./serene manual setup          # the public page's password and TOTP
+```
+
 The page is in `web/`. `web/dist` is committed, so `go build` doesn't need Node.
-After changing it, run `npm run build` in `web/`. To run the Postgres tests, set
-`SERENE_TEST_DATABASE_URL`; they use a temporary schema.
+After changing it, run `npm run build` in `web/` (`npm test` runs its tests).
 
 ## Real data
 
@@ -92,7 +173,7 @@ tried for that strategy.
 Fyers holds expired options and futures as 1-minute bars with OI: NIFTY and
 stocks from 2018-10-25, FINNIFTY from 2021-01, MIDCPNIFTY from 2022-01,
 NIFTYNXT50 from 2024-05, BANKEX from 2023-07-28 and SENSEX from 2023-08.
-Everything goes to `/run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers`
+Everything goes to `~/INSIGHTS/fyers`
 (`configs/fyers.yaml`), in the same Parquet layout as `data/upstox`. It needs
 the Prime plan; `plan: standard` keeps to Standard's caps instead. Set
 `FYERS_APP_ID`, `FYERS_SECRET` and `FYERS_REDIRECT_URI` in `.env`, then log in
@@ -141,7 +222,7 @@ Fyers' daily index close, which is also the only settlement source for SENSEX.
 
 ## ETF data
 
-Daily and 1-minute history for every ETF traded on NSE, into `/run/media/naveen/Seagate Expansion Drive/INSIGHTS/etf`,
+Daily and 1-minute history for every ETF traded on NSE, into `~/INSIGHTS/etf`,
 grouped by the country of the fund's holdings (`us`, `hongkong`, `india`). It
 needs a Kite or Upstox login from today, ideally both, and the bhavcopy store
 from `serene equities fetch`.
@@ -159,6 +240,21 @@ from the bhavcopy (daily, adjusted for splits, `source = bhav_adj`) and from Ups
 which keys by ISIN (1-minute, from 2022). Before 2022 a renamed fund's 1-minute
 bars start at the rename. Windows already downloaded are kept in `<country>/raw/`,
 so a stopped run carries on where it was.
+
+## Backup
+
+All data lives on the local disk: `data/` (equities, market, MCX from Kite,
+Upstox, NSE, live and paper state) and `~/INSIGHTS/{fyers,etf}`. At the end
+of the day, plug in the Seagate drive and mirror it there:
+
+```sh
+./serene backup --dry-run   # what would be copied or deleted
+./serene backup             # data/ -> MARKET_DATA, ~/INSIGHTS/{fyers,etf} -> INSIGHTS/{fyers,etf}
+```
+
+It is an exact mirror (`rsync --delete`): files deleted locally go from the
+drive too. It refuses to run if the drive is not mounted, or if a source is
+missing, empty, or itself on the drive. Folders are in `configs/backup.yaml`.
 
 ## Daily market report
 

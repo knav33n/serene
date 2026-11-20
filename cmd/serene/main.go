@@ -41,9 +41,12 @@ import (
 
 const usage = `serene researches and trades Indian index options.
 
-  serene auth                  open the broker login page
-  serene auth status           show each broker's login, never the token
-  serene auth logout BROKER    revoke a token at the broker and delete it
+  serene auth [--no-open]          the login page on 127.0.0.1:8080: log in to each broker, see where each login went
+  serene auth status               show each broker's login, never the token
+  serene auth logout BROKER        revoke a token at the broker and delete it
+  serene auth push [BROKER...]     hand stored logins to project_calm, and Zerodha / Upstox to hearth, again
+
+  serene manual [--addr 127.0.0.1:8767] [--slack] [--limit-wait 60s]   the manual trades page: REAL Nifty orders on Zerodha / Upstox
 
   serene research synth       --from DATE --to DATE [--underlying NIFTY] [--seed N] [--data DIR]
   serene research backtest    --config FILE [--unseal] [--holdout FILE]
@@ -90,14 +93,16 @@ const usage = `serene researches and trades Indian index options.
   serene fyers probe          [--underlying A,B] [--config configs/fyers.yaml]   (what history Fyers really serves; saves probe.parquet)
   serene fyers lots           (NSE/BSE F&O bhavcopies -> each expiry's lot, strikes and unadjusted price; universe.csv of every F&O stock since 2018)
   serene fyers all            [--underlying A,B]   (everything: spot, then expired options and futures, indices then stocks; runs for days, waits out the daily cap and token expiry)
-  serene fyers index          [--underlying A,B] [--from 2017-10-01]   (1m and daily spot bars into /run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers)
+  serene fyers index          [--underlying A,B] [--from 2017-10-01]   (1m and daily spot bars into ~/INSIGHTS/fyers)
   serene fyers backfill       [--underlying A,B] [--from DATE] [--to DATE]   (expired options and futures, 1m with OI; resumable)
   serene fyers update         [--underlying A,B]   (daily: live lot sizes, new spot days, newly expired options)
   serene fyers lot            --underlying NAME --from DATE --size N   (record a lot size for expiries from DATE)
 
   serene mcx fetch            [--names A,B] [--daily=true] [--minute=true] [--lookback-days 500] [--data DIR]
 
-  serene etf fetch            [--symbols A,B] [--dir /run/media/naveen/Seagate Expansion Drive/INSIGHTS/etf] [--data data/equities]   (every NSE ETF, daily and 1m; resumable)
+  serene etf fetch            [--symbols A,B] [--dir ~/INSIGHTS/etf] [--data data/equities]   (every NSE ETF, daily and 1m; resumable)
+
+  serene backup               [--dry-run] [--config configs/backup.yaml]   (mirror data/ and ~/INSIGHTS onto the Seagate drive; run at end of day)
 
   serene paper hmaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_hma_retest; entries/exits with P&L)
   serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
@@ -158,6 +163,12 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "auth" {
 		return runAuth(ctx, args[1:])
+	}
+	if len(args) > 0 && args[0] == "manual" {
+		return runManual(ctx, args[1:])
+	}
+	if len(args) > 0 && args[0] == "backup" {
+		return runBackup(ctx, args[1:])
 	}
 	if len(args) < 2 {
 		fmt.Print(usage)
@@ -1066,29 +1077,46 @@ func runAuth(ctx context.Context, args []string) error {
 
 	fs := flag.NewFlagSet("auth", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:8080", "local address; must match the redirect URLs registered with each broker")
+	_, hearthErr := os.Stat(hearthEnv)
+	noOpen := fs.Bool("no-open", false, "don't open the page in the browser")
+	toHearth := fs.Bool("hearth", hearthErr == nil, "also store Zerodha and Upstox logins on hearth (needs "+hearthEnv+" and the iac AWS profile)")
 	sub := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub, args = args[0], args[1:]
 	}
-	if err := fs.Parse(args); err != nil {
+	// Flags may come after the broker names too: serene auth push zerodha --hearth=false
+	var flags, names []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			flags = append(flags, a)
+		} else {
+			names = append(names, a)
+		}
+	}
+	if err := fs.Parse(flags); err != nil {
 		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("give flags as --name=value: %v", fs.Args())
 	}
 	base := "http://" + *addr
 	providers := auth.ProvidersFromEnv(base)
-	// Kite and Upstox are logged in each morning in project_calm; take its
-	// sessions when newer, so only brokers it lacks (Fyers) need a login here.
-	if url := os.Getenv("CALM_DATABASE_URL"); url != "" && sub != "logout" {
-		updated, err := auth.ImportCalm(ctx, url, store)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "project_calm logins not copied:", err)
-		} else if len(updated) > 0 {
-			fmt.Println("copied from project_calm:", strings.Join(updated, ", "))
-		}
-	}
-	srv :=&auth.Server{Addr: *addr, Providers: providers, Store: store, UI: web.Dist(),
-		Grace: 30 * time.Second, Idle: 10 * time.Minute}
+	srv := &auth.Server{Addr: *addr, Providers: providers, Store: store}
 
 	switch sub {
+	case "put": // on hearth, from serene auth's push
+		return authPut(ctx, store, names)
+	case "push":
+		if len(names) == 0 {
+			names = []string{"zerodha", "upstox", "breeze", "fyers"}
+		}
+		var errs []error
+		for _, name := range names {
+			if err := afterLogin(ctx, store, name, *toHearth, printDelivery(name)); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			}
+		}
+		return errors.Join(errs...)
 	case "status":
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintln(w, "broker\tstate\tuser\texpires")
@@ -1101,10 +1129,10 @@ func runAuth(ctx context.Context, args []string) error {
 		}
 		return w.Flush()
 	case "logout":
-		if fs.NArg() != 1 {
+		if len(names) != 1 {
 			return errors.New("usage: serene auth logout BROKER")
 		}
-		name := fs.Arg(0)
+		name := names[0]
 		known := false
 		for _, b := range auth.Brokers {
 			known = known || b.Name == name
@@ -1117,26 +1145,48 @@ func runAuth(ctx context.Context, args []string) error {
 		}
 		fmt.Printf("logged out of %s\n", name)
 		return nil
-	case "":
+	case "", "login":
 	default:
 		return fmt.Errorf("unknown auth command %q", sub)
 	}
 
+	if len(names) > 0 {
+		return errors.New("log in on the page: serene auth opens it (serene auth push BROKER resends a login)")
+	}
 	if tls, err := store.TLS(ctx); err == nil && !tls {
 		fmt.Fprintln(os.Stderr, "warning: the database connection isn't using TLS. Tokens are encrypted anyway, but other data is not.")
 	}
 	if len(providers) == 0 {
-		fmt.Fprintln(os.Stderr, "warning: no broker keys found in .env")
+		return errors.New("no broker keys found in .env")
 	}
 	if u, ok := providers["upstox"].(*auth.Upstox); ok {
 		fmt.Println("Upstox redirect URI (must exactly match your app):", u.RedirectURI)
 	}
-	fmt.Println("Opening", base)
-	fmt.Println("serene auth stops once every configured broker is logged in, or after 10 idle minutes.")
-	openBrowser(base)
-	return srv.Run(ctx)
+	srv.UI = web.Dist()
+	srv.After = func(ctx context.Context, broker string, report func(auth.Delivery)) {
+		if err := afterLogin(ctx, store, broker, *toHearth, func(d auth.Delivery) {
+			report(d)
+			printDelivery(broker)(d)
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", broker, err)
+		}
+	}
+	srv.Log = func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }
+	fmt.Printf("Logins on %s (Ctrl+C to stop)\n", base)
+	if !*noOpen {
+		openBrowser(base)
+	}
+	err = srv.Run(ctx)
+	srv.Settle()
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
+// terminalLogin logs in to each broker in turn: it prints the broker's login
+// URL and opens it, then takes the token pasted here (or the whole redirected
+// URL), or finishes by itself when the broker redirects to this machine.
 // openBrowser is best effort, because the URL has already been printed.
 func openBrowser(url string) {
 	name := "xdg-open"
@@ -1264,7 +1314,7 @@ func settlementCloses(ctx context.Context, c config, spec analytics.Spec) (map[m
 	}
 	name, ok := settlementIndex[spec.Underlying]
 	if !ok {
-		return nil, fmt.Errorf("no settlement index for %s: set settlement to a Fyers store, e.g. /run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers", spec.Underlying)
+		return nil, fmt.Errorf("no settlement index for %s: set settlement to a Fyers store, e.g. ~/INSIGHTS/fyers", spec.Underlying)
 	}
 	rows, err := store.IndexDays(ctx, spec.From, spec.To)
 	if err != nil {

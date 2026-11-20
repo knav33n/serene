@@ -9,88 +9,44 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// calmBrokers maps project_calm's broker names to serene's, with the IST hour
-// and minute each broker's tokens stop working.
-var calmBrokers = map[string]struct {
-	name         string
-	hour, minute int
-}{
-	"kite":   {"zerodha", 6, 0},
-	"upstox": {"upstox", 3, 30},
+// calmNames maps serene's brokers to project_calm's. Fyers isn't one of its.
+var calmNames = map[string]string{"zerodha": "kite", "upstox": "upstox", "breeze": "breeze"}
+
+// CalmBroker is project_calm's name for a broker, and whether it uses it.
+func CalmBroker(broker string) (string, bool) {
+	n, ok := calmNames[broker]
+	return n, ok
 }
 
-// CalmSession is one row of project_calm's trading.broker_sessions.
-type CalmSession struct {
-	Broker, ClientID string
-	AccessToken      Secret
-	LoginAt          time.Time
-}
-
-// FromCalm turns a project_calm session into a serene token. It reports false
-// for a broker serene doesn't use.
-func FromCalm(s CalmSession) (Token, bool) {
-	b, ok := calmBrokers[s.Broker]
+// ExportCalm writes a login into project_calm's trading.broker_sessions,
+// where calm's trading and downloads read their tokens: logins are made in
+// serene now. calm stores them in the clear, as it always has. A broker calm
+// doesn't use is skipped; it reports whether the row was written.
+func ExportCalm(ctx context.Context, calmURL string, t Token) (bool, error) {
+	name, ok := CalmBroker(t.Broker)
 	if !ok {
-		return Token{}, false
+		return false, nil
 	}
-	return Token{Broker: b.name, UserID: s.ClientID, AccessToken: s.AccessToken,
-		IssuedAt: s.LoginAt, ExpiresAt: nextCutoff(s.LoginAt, b.hour, b.minute)}, true
-}
-
-// ImportCalm copies the brokers' sessions from project_calm, where the user
-// logs in each morning, into s. A session replaces the stored token only when
-// it is newer. It returns the brokers it updated.
-func ImportCalm(ctx context.Context, calmURL string, s Store) ([]string, error) {
 	if calmURL == "" {
-		return nil, errors.New("CALM_DATABASE_URL is not set")
+		return false, errors.New("CALM_DATABASE_URL is not set")
 	}
 	cfg, err := pgx.ParseConfig(calmURL)
 	if err != nil {
-		return nil, errors.New("CALM_DATABASE_URL is not a valid Postgres URL")
+		return false, errors.New("CALM_DATABASE_URL is not a valid Postgres URL")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("connect to project_calm: %w", err)
+		return false, fmt.Errorf("connect to project_calm: %w", err)
 	}
 	defer conn.Close(context.WithoutCancel(ctx))
-	rows, err := conn.Query(ctx, `SELECT broker, client_id, access_token, login_at FROM trading.broker_sessions`)
+	_, err = conn.Exec(ctx, `INSERT INTO trading.broker_sessions (broker, client_id, access_token, login_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (broker) DO UPDATE SET client_id = excluded.client_id, access_token = excluded.access_token,
+			login_at = excluded.login_at`, name, t.UserID, t.AccessToken.Reveal(), t.IssuedAt)
 	if err != nil {
-		return nil, fmt.Errorf("read project_calm sessions: %w", err)
+		return false, fmt.Errorf("write project_calm's %s login: %w", name, err)
 	}
-	var sessions []CalmSession
-	for rows.Next() {
-		var c CalmSession
-		var tok string
-		if err := rows.Scan(&c.Broker, &c.ClientID, &tok, &c.LoginAt); err != nil {
-			return nil, err
-		}
-		c.AccessToken = Secret(tok)
-		sessions = append(sessions, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	var updated []string
-	for _, c := range sessions {
-		t, ok := FromCalm(c)
-		if !ok {
-			continue
-		}
-		old, err := s.Get(ctx, t.Broker)
-		if err != nil && !errors.Is(err, ErrNoToken) {
-			return updated, err
-		}
-		// Only a newer login replaces the stored one: an older project_calm
-		// session would otherwise overwrite a fresh serene auth login.
-		if err == nil && !t.IssuedAt.After(old.IssuedAt) {
-			continue
-		}
-		if err := s.Put(ctx, t); err != nil {
-			return updated, err
-		}
-		updated = append(updated, t.Broker)
-	}
-	return updated, nil
+	return true, nil
 }

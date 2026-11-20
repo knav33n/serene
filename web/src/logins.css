@@ -1,0 +1,59 @@
+/* serene auth's page, on the manual page's tokens. One thing is loud: the sentence that says what's
+   left to do today, set big in Bricolage. The brokers are rows of one sheet, not cards; each live
+   login carries a hairline of how much of it is left. */
+main.logins { max-width: 860px; padding-top: 28px; gap: 28px; }
+.logins header { gap: 18px; }
+.logins .today { margin: 0; color: var(--ink-3); font: 500 13px/1.4 var(--text); font-variant-numeric: tabular-nums; }
+.logins h1 { font-size: clamp(32px, 5.2vw, 56px); font-weight: 760; font-stretch: 76%; line-height: 1.0;
+  letter-spacing: -0.025em; max-width: 18ch; }
+
+.brokers { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 14px; overflow: hidden; }
+.broker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 20px; align-items: center;
+  padding: 20px 22px; position: relative; transition: background .2s; }
+.broker + .broker { border-top: 1px solid var(--grid); }
+/* The left edge says the state at a glance: ok, waiting on you, or quiet */
+.broker::before { content: ""; position: absolute; left: 0; top: 18px; bottom: 18px; width: 3px; border-radius: 0 3px 3px 0;
+  background: var(--rule); }
+.broker.active::before { background: var(--ok); }
+.broker.logged_out::before, .broker.expired::before, .broker.open::before { background: var(--accent); }
+.broker.open { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
+.broker.not_configured h2, .broker.not_configured .state { color: var(--ink-3); }
+
+.broker .who { display: grid; gap: 4px; min-width: 0; }
+.broker h2 { font-size: 23px; font-weight: 720; font-stretch: 82%; }
+.broker .state { margin: 0; color: var(--ink-2); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.broker .state b { font-weight: 500; color: var(--ink); }
+.broker .state.bad, .broker .hint.bad { color: var(--live); }
+.broker .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.broker .hint, .broker .sent, .broker .paste { grid-column: 1 / -1; margin: 0; }
+.broker .hint { font-size: 13px; color: var(--ink-3); }
+
+.life { height: 3px; border-radius: 2px; background: var(--grid); margin-top: 8px; max-width: 360px; overflow: hidden; }
+.life > span { display: block; height: 100%; background: var(--ok); border-radius: 2px; transition: width .6s ease; }
+
+.sent { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-3); }
+.sent li { display: inline-flex; align-items: center; gap: 7px; }
+.sent li i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.sent li.failed { color: var(--live); }
+.sent li.failed i { background: var(--live); }
+.sent .spin { width: 10px; height: 10px; border-width: 1.5px; }
+
+.paste { display: grid; gap: 10px; padding-top: 4px; animation: unfold .22s ease-out; }
+.paste p { margin: 0; font-size: 13px; color: var(--ink-2); max-width: 68ch; }
+.paste .row { flex-wrap: nowrap; }
+.paste input { flex: 1; padding: 10px 12px; font-size: 13.5px; border-radius: 8px; background: var(--panel); }
+@keyframes unfold { from { opacity: 0; transform: translateY(-4px); } }
+
+button.b { padding: 9px 14px; border-radius: 8px; }
+button.b.quiet { border-color: transparent; background: none; color: var(--ink-3); }
+button.b.quiet:hover { color: var(--ink); background: var(--hover); }
+.logins > .note { max-width: 68ch; }
+
+@media (max-width: 600px) {
+  .broker { grid-template-columns: minmax(0, 1fr); padding: 18px 16px 18px 18px; }
+  .broker .acts { justify-content: flex-start; }
+  .paste .row { flex-wrap: wrap; }
+  .paste .row input { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .paste { animation: none; } .life > span, .broker { transition: none; } }

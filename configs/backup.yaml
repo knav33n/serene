@@ -1,0 +1,8 @@
+# serene backup: mirror local data onto the Seagate drive (rsync --delete).
+# Run by hand at the end of the day. Every source must be a local, non-empty
+# folder and the drive must be mounted, or nothing is copied.
+drive: "/run/media/naveen/Seagate Expansion Drive"
+pairs:
+  - {from: data, to: MARKET_DATA} # equities, market, mcx (Kite), upstox, NSE, live/paper state
+  - {from: ~/INSIGHTS/fyers, to: INSIGHTS/fyers}
+  - {from: ~/INSIGHTS/etf, to: INSIGHTS/etf}

@@ -1,0 +1,18 @@
+[Unit]
+Description=serene manual trades page, the home page at https://hearth.naveenkumar.dev/ behind its login (Caddy proxies to it)
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=serene
+Group=serene
+WorkingDirectory=/home/serene/app
+ExecStart=/home/serene/app/serene manual --public=hearth.naveenkumar.dev --slack
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

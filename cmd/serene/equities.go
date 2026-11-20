@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -60,12 +59,6 @@ func upstoxClient(ctx context.Context) (*upstox.Client, error) {
 		return nil, err
 	}
 	defer tokens.Close()
-	if url := os.Getenv("CALM_DATABASE_URL"); url != "" {
-		// On hearth the Upstox login is made in project_calm.
-		if _, err := auth.ImportCalm(ctx, url, tokens); err != nil {
-			fmt.Fprintln(os.Stderr, "project_calm tokens not copied:", err)
-		}
-	}
 	token, err := auth.Load(ctx, tokens, "upstox")
 	if err != nil {
 		return nil, err

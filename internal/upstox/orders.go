@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 )
 
 // HFTURL is the host for placing, modifying and cancelling orders.
@@ -41,6 +43,10 @@ type Order struct {
 	Trigger       float64 `json:"trigger_price"`
 	Average       float64 `json:"average_price"`
 	Tag           string  `json:"tag"`
+	Symbol        string  `json:"trading_symbol"`
+	Exchange      string  `json:"exchange"`
+	Product       string  `json:"product"`
+	Placed        string  `json:"order_timestamp"`
 }
 
 // send makes one request, never retried: a timeout may still have placed the
@@ -202,11 +208,22 @@ func (c *Client) StaticIPs(ctx context.Context) (primary, secondary string, err 
 	return d.Primary, d.Secondary, err
 }
 
-// Position is a day position.
+// Position is a day position: what's held now and what was traded today,
+// with Upstox's P&L on it before charges.
 type Position struct {
-	Instrument string `json:"instrument_token"`
-	Product    string `json:"product"`
-	Qty        int64  `json:"quantity"`
+	Instrument   string  `json:"instrument_token"`
+	Product      string  `json:"product"`
+	Qty          int64   `json:"quantity"`
+	Symbol       string  `json:"trading_symbol"`
+	Exchange     string  `json:"exchange"`
+	Average      float64 `json:"average_price"`
+	Last         float64 `json:"last_price"`
+	PnL          float64 `json:"pnl"`
+	Overnight    int64   `json:"overnight_quantity"`
+	DayBuyQty    int64   `json:"day_buy_quantity"`
+	DayBuyPrice  float64 `json:"day_buy_price"`
+	DaySellQty   int64   `json:"day_sell_quantity"`
+	DaySellPrice float64 `json:"day_sell_price"`
 }
 
 // Positions lists the account's day positions.
@@ -214,4 +231,57 @@ func (c *Client) Positions(ctx context.Context) ([]Position, error) {
 	var out []Position
 	err := c.send(ctx, http.MethodGet, c.BaseURL+"/v2/portfolio/short-term-positions", nil, &out)
 	return out, err
+}
+
+// Trade is one fill in today's tradebook. ExchangeTime comes without a zone
+// and, as seen on project_calm's trades, 5:30 ahead of IST.
+type Trade struct {
+	OrderID      string  `json:"order_id"`
+	Exchange     string  `json:"exchange"`
+	Symbol       string  `json:"trading_symbol"`
+	Instrument   string  `json:"instrument_token"`
+	Product      string  `json:"product"`
+	Side         string  `json:"transaction_type"`
+	Qty          int64   `json:"quantity"`
+	Average      float64 `json:"average_price"`
+	ExchangeTime string  `json:"exchange_timestamp"`
+	OrderTime    string  `json:"order_timestamp"`
+}
+
+// Trades lists today's fills.
+func (c *Client) Trades(ctx context.Context) ([]Trade, error) {
+	var out []Trade
+	err := c.send(ctx, http.MethodGet, c.BaseURL+"/v2/order/trades/get-trades-for-day", nil, &out)
+	return out, err
+}
+
+// Charges is Upstox's total charges for one order: brokerage, STT, exchange
+// and SEBI fees, stamp duty and GST.
+func (c *Client) Charges(ctx context.Context, instrument, product, side string, qty int64, price float64) (float64, error) {
+	q := url.Values{"instrument_token": {instrument}, "quantity": {strconv.FormatInt(qty, 10)}, "product": {product},
+		"transaction_type": {side}, "price": {strconv.FormatFloat(price, 'f', 2, 64)}}
+	var d struct {
+		Charges struct {
+			Total float64 `json:"total"`
+		} `json:"charges"`
+	}
+	err := c.send(ctx, http.MethodGet, c.BaseURL+"/v2/charges/brokerage?"+q.Encode(), nil, &d)
+	return d.Charges.Total, err
+}
+
+// LTP is each instrument's last traded price, by instrument key.
+func (c *Client) LTP(ctx context.Context, keys ...string) (map[string]float64, error) {
+	var d map[string]struct {
+		Last  float64 `json:"last_price"`
+		Token string  `json:"instrument_token"`
+	}
+	q := url.Values{"instrument_key": {strings.Join(keys, ",")}}
+	if err := c.send(ctx, http.MethodGet, c.BaseURL+"/v2/market-quote/ltp?"+q.Encode(), nil, &d); err != nil {
+		return nil, err
+	}
+	out := map[string]float64{}
+	for _, v := range d {
+		out[v.Token] = v.Last
+	}
+	return out, nil
 }

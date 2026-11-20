@@ -340,7 +340,7 @@ func combRun(ctx context.Context, list string, scans []combScan, equitiesDir, re
 	for _, n := range more {
 		// Without a token the fundamentals can't be checked: fail, so the alert says why.
 		if strings.HasPrefix(n, "fundamentals ") {
-			return fmt.Errorf("%s (log in to Upstox in project_calm)", n)
+			return fmt.Errorf("%s (log in to Upstox with serene auth)", n)
 		}
 	}
 	for k := range rows {

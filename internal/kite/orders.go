@@ -1,6 +1,7 @@
 package kite
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,6 +40,9 @@ type Order struct {
 	Trigger       float64 `json:"trigger_price"`
 	Average       float64 `json:"average_price"`
 	Tag           string  `json:"tag"`
+	Exchange      string  `json:"exchange"`
+	Product       string  `json:"product"`
+	Variety       string  `json:"variety"`
 }
 
 func (o OrderRequest) form() url.Values {
@@ -62,18 +66,21 @@ func (o OrderRequest) form() url.Values {
 // send makes one order request, never retried: a timeout may still have
 // reached Kite, so the caller reconciles by tag instead of resending.
 func (c *Client) send(ctx context.Context, method, path string, form url.Values, out any) error {
-	var body io.Reader
-	if form != nil {
-		body = strings.NewReader(form.Encode())
+	if form == nil {
+		return c.do(ctx, method, path, nil, "", out)
 	}
+	return c.do(ctx, method, path, strings.NewReader(form.Encode()), "application/x-www-form-urlencoded", out)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body io.Reader, ctype string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("X-Kite-Version", "3")
 	req.Header.Set("Authorization", "token "+c.APIKey+":"+c.Token.Reveal())
-	if form != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if ctype != "" {
+		req.Header.Set("Content-Type", ctype)
 	}
 	c.Requests++
 	resp, err := c.HTTP.Do(req)
@@ -164,12 +171,21 @@ func (c *Client) EquityFunds(ctx context.Context) (float64, error) {
 	return d.Net, nil
 }
 
-// Position is a net position.
+// Position is a net position: what's held now and what was traded today,
+// with Kite's P&L on it before charges.
 type Position struct {
-	Symbol   string `json:"tradingsymbol"`
-	Exchange string `json:"exchange"`
-	Product  string `json:"product"`
-	Qty      int64  `json:"quantity"`
+	Symbol       string  `json:"tradingsymbol"`
+	Exchange     string  `json:"exchange"`
+	Product      string  `json:"product"`
+	Qty          int64   `json:"quantity"`
+	Average      float64 `json:"average_price"`
+	Last         float64 `json:"last_price"`
+	PnL          float64 `json:"pnl"`
+	Overnight    int64   `json:"overnight_quantity"`
+	DayBuyQty    int64   `json:"day_buy_quantity"`
+	DayBuyPrice  float64 `json:"day_buy_price"`
+	DaySellQty   int64   `json:"day_sell_quantity"`
+	DaySellPrice float64 `json:"day_sell_price"`
 }
 
 // Positions lists the account's net positions.
@@ -179,4 +195,69 @@ func (c *Client) Positions(ctx context.Context) ([]Position, error) {
 	}
 	err := c.send(ctx, http.MethodGet, "/portfolio/positions", nil, &d)
 	return d.Net, err
+}
+
+// Trade is one fill in today's tradebook.
+type Trade struct {
+	OrderID      string  `json:"order_id"`
+	Exchange     string  `json:"exchange"`
+	Symbol       string  `json:"tradingsymbol"`
+	Product      string  `json:"product"`
+	Side         string  `json:"transaction_type"`
+	Qty          int64   `json:"quantity"`
+	Average      float64 `json:"average_price"`
+	FillTime     string  `json:"fill_timestamp"`
+	ExchangeTime string  `json:"exchange_timestamp"`
+}
+
+// Trades lists today's fills.
+func (c *Client) Trades(ctx context.Context) ([]Trade, error) {
+	var out []Trade
+	err := c.send(ctx, http.MethodGet, "/trades", nil, &out)
+	return out, err
+}
+
+// OrderCharges is Kite's virtual contract note for orders that filled: the
+// total of brokerage, STT, exchange and SEBI fees, stamp duty and GST for
+// each, in the order given.
+func (c *Client) OrderCharges(ctx context.Context, orders []Order) ([]float64, error) {
+	type row struct {
+		ID       string  `json:"order_id"`
+		Exchange string  `json:"exchange"`
+		Symbol   string  `json:"tradingsymbol"`
+		Side     string  `json:"transaction_type"`
+		Variety  string  `json:"variety"`
+		Product  string  `json:"product"`
+		Type     string  `json:"order_type"`
+		Qty      int64   `json:"quantity"`
+		Average  float64 `json:"average_price"`
+	}
+	in := make([]row, len(orders))
+	for i, o := range orders {
+		v := o.Variety
+		if v == "" {
+			v = "regular"
+		}
+		in[i] = row{o.ID, o.Exchange, o.Symbol, o.Side, v, o.Product, o.Type, o.Filled, o.Average}
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	var out []struct {
+		Charges struct {
+			Total float64 `json:"total"`
+		} `json:"charges"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/charges/orders", bytes.NewReader(b), "application/json", &out); err != nil {
+		return nil, err
+	}
+	if len(out) != len(orders) {
+		return nil, fmt.Errorf("kite's contract note has %d rows for %d orders", len(out), len(orders))
+	}
+	totals := make([]float64, len(out))
+	for i, r := range out {
+		totals[i] = r.Charges.Total
+	}
+	return totals, nil
 }

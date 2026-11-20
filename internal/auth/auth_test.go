@@ -123,8 +123,7 @@ func newFake(t *testing.T) *fakeBroker {
 var clock = func() time.Time { d, _ := market.ParseDate("2026-11-06"); return d.At(8, 0) }
 
 func newServer(f *fakeBroker, store Store) *Server {
-	return &Server{Addr: addr, Store: store, Now: clock, Grace: time.Hour,
-		UI: fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}, "assets/a.js": {Data: []byte("js")}},
+	return &Server{Addr: addr, Store: store, Now: clock,
 		Providers: map[string]Provider{
 			"upstox":  &Upstox{APIKey: "upkey", APISecret: realSecret, RedirectURI: origin + "/callback/upstox", BaseURL: f.URL, Now: clock},
 			"zerodha": &Zerodha{APIKey: "kitekey", APISecret: "secretvalue", LoginBase: f.URL, APIBase: f.URL, Now: clock},
@@ -134,9 +133,6 @@ func newServer(f *fakeBroker, store Store) *Server {
 func call(h http.Handler, method, path string, headers map[string]string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, "http://"+addr+path, nil)
 	r.Host = addr
-	if method != http.MethodGet {
-		r.Header.Set("Origin", origin)
-	}
 	for k, v := range headers {
 		if k == "Host" {
 			r.Host = v
@@ -149,16 +145,14 @@ func call(h http.Handler, method, path string, headers map[string]string) *httpt
 	return w
 }
 
-// startLogin returns the state value from the broker URL the page would use.
-func startLogin(t *testing.T, h http.Handler, broker string) string {
+// startLogin returns the state value from the broker URL serene auth prints.
+func startLogin(t *testing.T, s *Server, broker string) string {
 	t.Helper()
-	w := call(h, "POST", "/api/brokers/"+broker+"/login", nil)
-	if w.Code != 200 {
-		t.Fatalf("login: %d %s", w.Code, w.Body)
+	raw, err := s.Start(broker)
+	if err != nil {
+		t.Fatalf("login: %v", err)
 	}
-	var r struct{ URL string }
-	json.Unmarshal(w.Body.Bytes(), &r)
-	u, err := url.Parse(r.URL)
+	u, err := url.Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,13 +163,11 @@ func startLogin(t *testing.T, h http.Handler, broker string) string {
 	return u.Query().Get("state")
 }
 
-func brokerState(t *testing.T, h http.Handler, name string) Status {
+func brokerState(t *testing.T, s *Server, name string) Status {
 	t.Helper()
-	var out []Status
-	json.Unmarshal(call(h, "GET", "/api/brokers", nil).Body.Bytes(), &out)
-	for _, s := range out {
-		if s.Name == name {
-			return s
+	for _, st := range s.Statuses(context.Background()) {
+		if st.Name == name {
+			return st
 		}
 	}
 	t.Fatalf("no status for %s", name)
@@ -184,11 +176,12 @@ func brokerState(t *testing.T, h http.Handler, name string) Status {
 
 func TestUpstoxLogin(t *testing.T) {
 	f, store := newFake(t), newMem()
-	h := newServer(f, store).Handler()
-	state := startLogin(t, h, "upstox")
+	s := newServer(f, store)
+	h := s.Handler()
+	state := startLogin(t, s, "upstox")
 	w := call(h, "GET", "/callback/upstox?code=abc&state="+state, nil)
-	if w.Code != http.StatusSeeOther || !strings.Contains(w.Header().Get("Location"), "result=ok") {
-		t.Fatalf("callback %d %s", w.Code, w.Header().Get("Location"))
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/?done=upstox" || !s.Done("upstox") {
+		t.Fatalf("callback %d %s", w.Code, w.Body)
 	}
 	got := store.rows["upstox"]
 	if got.AccessToken.Reveal() != realToken || got.UserID != "UPX1" {
@@ -204,25 +197,32 @@ func TestUpstoxLogin(t *testing.T) {
 			t.Errorf("%s = %q", k, f.form.Get(k))
 		}
 	}
-	if s := brokerState(t, h, "upstox"); s.State != "active" || s.UserID != "UPX1" {
-		t.Errorf("status %+v", s)
+	if st := brokerState(t, s, "upstox"); st.State != "active" || st.UserID != "UPX1" {
+		t.Errorf("status %+v", st)
 	}
 }
 
 func TestZerodhaLoginUsesHandComputedChecksum(t *testing.T) {
 	f, store := newFake(t), newMem()
-	h := newServer(f, store).Handler()
-	state := startLogin(t, h, "zerodha")
+	s := newServer(f, store)
+	state := startLogin(t, s, "zerodha")
 	if len(state) != 64 {
 		t.Fatalf("state %q did not round trip through redirect_params", state)
 	}
-	call(h, "GET", "/callback/zerodha?action=login&status=success&request_token=reqtoken&state="+state, nil)
+	call(s.Handler(), "GET", "/callback/zerodha?action=login&status=success&request_token=reqtoken&state="+state, nil)
 	if f.form.Get("checksum") != kiteChecksum || f.kiteHeader != "3" {
 		t.Errorf("checksum %q version %q", f.form.Get("checksum"), f.kiteHeader)
 	}
 	got := store.rows["zerodha"]
 	if got.AccessToken.Reveal() != realToken || !got.ExpiresAt.Equal(market.DateOf(clock()).AddDays(1).At(6, 0)) {
 		t.Fatalf("stored %+v", got)
+	}
+}
+
+func TestStartNeedsTheBrokersKeys(t *testing.T) {
+	s := newServer(newFake(t), newMem())
+	if _, err := s.Start("fyers"); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("%v", err)
 	}
 }
 
@@ -244,13 +244,14 @@ func TestBadCallbacksStoreNothing(t *testing.T) {
 			if c.setup != nil {
 				c.setup(f)
 			}
-			h := newServer(f, store).Handler()
-			state := startLogin(t, h, "upstox")
-			w := call(h, "GET", c.path(state), nil)
-			if !strings.Contains(w.Header().Get("Location"), "result=failed") {
-				t.Errorf("location %s", w.Header().Get("Location"))
+			s := newServer(f, store)
+			state := startLogin(t, s, "upstox")
+			w := call(s.Handler(), "GET", c.path(state), nil)
+			name := strings.TrimPrefix(strings.Split(c.path(state), "?")[0], "/callback/")
+			if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/?failed="+name || s.LastError(name) == "" {
+				t.Errorf("%d %s %q", w.Code, w.Header().Get("Location"), s.LastError("upstox"))
 			}
-			if len(store.rows) != 0 {
+			if len(store.rows) != 0 || s.Done("upstox") {
 				t.Errorf("stored %+v", store.rows)
 			}
 		})
@@ -261,7 +262,7 @@ func TestStateIsSingleUseAndExpires(t *testing.T) {
 	f, store := newFake(t), newMem()
 	s := newServer(f, store)
 	h := s.Handler()
-	state := startLogin(t, h, "upstox")
+	state := startLogin(t, s, "upstox")
 	call(h, "GET", "/callback/upstox?code=abc&state="+state, nil)
 	delete(store.rows, "upstox")
 	call(h, "GET", "/callback/upstox?code=abc&state="+state, nil)
@@ -269,7 +270,7 @@ func TestStateIsSingleUseAndExpires(t *testing.T) {
 		t.Error("state worked twice")
 	}
 
-	state = startLogin(t, h, "upstox")
+	state = startLogin(t, s, "upstox")
 	s.Now = func() time.Time { return clock().Add(pendingTTL + time.Second) }
 	call(h, "GET", "/callback/upstox?code=abc&state="+state, nil)
 	if len(store.rows) != 0 {
@@ -277,63 +278,51 @@ func TestStateIsSingleUseAndExpires(t *testing.T) {
 	}
 }
 
-func paste(h http.Handler, broker, value string, headers map[string]string) *httptest.ResponseRecorder {
-	b, _ := json.Marshal(map[string]string{"value": value})
-	r := httptest.NewRequest("POST", "http://"+addr+"/api/brokers/"+broker+"/token", strings.NewReader(string(b)))
-	r.Host = addr
-	r.Header.Set("Origin", origin)
-	for k, v := range headers {
-		r.Header.Set(k, v)
-	}
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	return w
-}
-
 func TestPastedToken(t *testing.T) {
+	ctx := context.Background()
 	t.Run("bare zerodha token", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "zerodha")
-		if w := paste(h, "zerodha", "  reqtoken\n", nil); w.Code != 200 {
-			t.Fatalf("%d %s", w.Code, w.Body)
+		s := newServer(f, store)
+		startLogin(t, s, "zerodha")
+		if err := s.Paste(ctx, "zerodha", "  reqtoken\n"); err != nil {
+			t.Fatal(err)
 		}
-		if f.form.Get("checksum") != kiteChecksum || store.rows["zerodha"].UserID != "ZD1" {
+		if f.form.Get("checksum") != kiteChecksum || store.rows["zerodha"].UserID != "ZD1" || !s.Done("zerodha") {
 			t.Errorf("checksum %q rows %v", f.form.Get("checksum"), store.rows)
 		}
 	})
 	t.Run("bare upstox code", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "upstox")
-		paste(h, "upstox", "abc", nil)
+		s := newServer(f, store)
+		startLogin(t, s, "upstox")
+		s.Paste(ctx, "upstox", "abc")
 		if f.form.Get("code") != "abc" || store.rows["upstox"].UserID != "UPX1" {
 			t.Errorf("code %q rows %v", f.form.Get("code"), store.rows)
 		}
 	})
 	t.Run("whole redirected URL", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		state := startLogin(t, h, "zerodha")
-		w := paste(h, "zerodha", "https://example.com/cb?action=login&status=success&request_token=reqtoken&state="+state, nil)
-		if w.Code != 200 || f.form.Get("checksum") != kiteChecksum {
-			t.Fatalf("%d %s", w.Code, w.Body)
+		s := newServer(f, store)
+		state := startLogin(t, s, "zerodha")
+		err := s.Paste(ctx, "zerodha", "https://example.com/cb?action=login&status=success&request_token=reqtoken&state="+state)
+		if err != nil || f.form.Get("checksum") != kiteChecksum {
+			t.Fatal(err)
 		}
 	})
 	t.Run("redirected URL without state", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "zerodha")
-		if w := paste(h, "zerodha", "https://example.com/cb?request_token=reqtoken", nil); w.Code != 200 {
-			t.Fatalf("%d %s", w.Code, w.Body)
+		s := newServer(f, store)
+		startLogin(t, s, "zerodha")
+		if err := s.Paste(ctx, "zerodha", "https://example.com/cb?request_token=reqtoken"); err != nil {
+			t.Fatal(err)
 		}
 	})
 	t.Run("URL from another login is refused", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "zerodha")
-		if w := paste(h, "zerodha", "https://example.com/cb?request_token=x&state=forged", nil); w.Code != http.StatusConflict {
-			t.Fatalf("%d", w.Code)
+		s := newServer(f, store)
+		startLogin(t, s, "zerodha")
+		if err := s.Paste(ctx, "zerodha", "https://example.com/cb?request_token=x&state=forged"); err != ErrNoLogin {
+			t.Fatal(err)
 		}
 		if len(store.rows) != 0 {
 			t.Error("stored a token")
@@ -341,107 +330,94 @@ func TestPastedToken(t *testing.T) {
 	})
 	t.Run("URL without the token", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "zerodha")
-		if w := paste(h, "zerodha", "https://example.com/cb?status=cancelled", nil); w.Code != http.StatusBadRequest {
-			t.Fatalf("%d", w.Code)
+		s := newServer(f, store)
+		startLogin(t, s, "zerodha")
+		if err := s.Paste(ctx, "zerodha", "https://example.com/cb?status=cancelled"); err == nil || !strings.Contains(err.Error(), "no request_token") {
+			t.Fatal(err)
 		}
 	})
 	t.Run("needs a login in progress", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		if w := paste(h, "zerodha", "reqtoken", nil); w.Code != http.StatusConflict {
-			t.Fatalf("%d", w.Code)
+		s := newServer(f, store)
+		if err := s.Paste(ctx, "zerodha", "reqtoken"); err != ErrNoLogin {
+			t.Fatal(err)
 		}
-		startLogin(t, h, "upstox")
-		if w := paste(h, "zerodha", "reqtoken", nil); w.Code != http.StatusConflict {
-			t.Fatalf("other broker's login accepted: %d", w.Code)
+		startLogin(t, s, "upstox")
+		if err := s.Paste(ctx, "zerodha", "reqtoken"); err != ErrNoLogin {
+			t.Fatalf("other broker's login accepted: %v", err)
 		}
 	})
 	t.Run("login expires", func(t *testing.T) {
 		f, store := newFake(t), newMem()
 		s := newServer(f, store)
-		h := s.Handler()
-		startLogin(t, h, "zerodha")
+		startLogin(t, s, "zerodha")
 		s.Now = func() time.Time { return clock().Add(pendingTTL + time.Second) }
-		if w := paste(h, "zerodha", "reqtoken", nil); w.Code != http.StatusConflict {
-			t.Fatalf("%d", w.Code)
+		if err := s.Paste(ctx, "zerodha", "reqtoken"); err != ErrNoLogin {
+			t.Fatal(err)
 		}
 	})
 	t.Run("refused token can be retried, then login closes", func(t *testing.T) {
 		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "zerodha")
+		s := newServer(f, store)
+		startLogin(t, s, "zerodha")
 		f.exchange = 403
-		w := paste(h, "zerodha", "typo", nil)
-		if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "typo") || len(store.rows) != 0 {
-			t.Fatalf("%d %s %v", w.Code, w.Body, store.rows)
+		err := s.Paste(ctx, "zerodha", "typo")
+		if err == nil || strings.Contains(err.Error(), "typo") || len(store.rows) != 0 {
+			t.Fatalf("%v %v", err, store.rows)
 		}
 		f.exchange = 200
-		if w := paste(h, "zerodha", "reqtoken", nil); w.Code != 200 {
-			t.Fatalf("retry: %d", w.Code)
+		if err := s.Paste(ctx, "zerodha", "reqtoken"); err != nil {
+			t.Fatalf("retry: %v", err)
 		}
-		if w := paste(h, "zerodha", "reqtoken", nil); w.Code != http.StatusConflict {
-			t.Fatalf("login stayed open: %d", w.Code)
-		}
-	})
-	t.Run("foreign origin is refused", func(t *testing.T) {
-		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "zerodha")
-		if w := paste(h, "zerodha", "reqtoken", map[string]string{"Origin": "https://evil.example"}); w.Code != http.StatusForbidden {
-			t.Fatalf("%d", w.Code)
-		}
-	})
-	t.Run("status never includes the token", func(t *testing.T) {
-		f, store := newFake(t), newMem()
-		h := newServer(f, store).Handler()
-		startLogin(t, h, "zerodha")
-		w := paste(h, "zerodha", "reqtoken", nil)
-		if strings.Contains(w.Body.String(), realToken) || !strings.Contains(w.Body.String(), `"token_param":"request_token"`) {
-			t.Fatalf("%s", w.Body)
+		if err := s.Paste(ctx, "zerodha", "reqtoken"); err != ErrNoLogin {
+			t.Fatalf("login stayed open: %v", err)
 		}
 	})
 }
 
 func TestGuards(t *testing.T) {
 	f, store := newFake(t), newMem()
-	store.rows["upstox"] = Token{Broker: "upstox", AccessToken: realToken, ExpiresAt: clock().Add(time.Hour)}
-	h := newServer(f, store).Handler()
-	cases := []struct {
-		name, method, path string
-		headers            map[string]string
-	}{
-		{"rebinding host on status", "GET", "/api/brokers", map[string]string{"Host": "evil.example:8080"}},
-		{"rebinding host on callback", "GET", "/callback/upstox", map[string]string{"Host": "evil.example"}},
-		{"foreign origin login", "POST", "/api/brokers/upstox/login", map[string]string{"Origin": "https://evil.example"}},
-		{"foreign origin logout", "POST", "/api/brokers/upstox/logout", map[string]string{"Origin": "https://evil.example"}},
-		{"missing origin logout", "POST", "/api/brokers/upstox/logout", map[string]string{"Origin": ""}},
+	s := newServer(f, store)
+	h := s.Handler()
+	state := startLogin(t, s, "upstox")
+	if w := call(h, "GET", "/callback/upstox?code=abc&state="+state, map[string]string{"Host": "evil.example"}); w.Code != http.StatusForbidden {
+		t.Errorf("rebinding host on callback: %d", w.Code)
 	}
-	for _, c := range cases {
-		if w := call(h, c.method, c.path, c.headers); w.Code != http.StatusForbidden {
-			t.Errorf("%s: %d", c.name, w.Code)
-		}
-	}
-	if f.revoked != 0 || len(store.rows) != 1 {
+	if len(store.rows) != 0 {
 		t.Error("a blocked request had an effect")
 	}
-	w := call(h, "GET", "/", nil)
-	if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), "app") {
-		t.Errorf("page: %d %q", w.Code, w.Header().Get("Cache-Control"))
+	// The page and its assets, nothing else of the build (the manual page's index.html)
+	s.UI = fstest.MapFS{"login.html": {Data: []byte("<p>logins</p>")}, "index.html": {Data: []byte("manual")},
+		"assets/a.js": {Data: []byte("js")}}
+	h = s.Handler()
+	for path, want := range map[string]int{"/": 200, "/login.html": 200, "/assets/a.js": 200, "/index.html": 404, "/x": 404} {
+		if w := call(h, "GET", path, nil); w.Code != want {
+			t.Errorf("GET %s: %d, want %d", path, w.Code, want)
+		}
 	}
-	if w := call(h, "HEAD", "/", map[string]string{"Origin": ""}); w.Code != 200 {
-		t.Errorf("HEAD: %d", w.Code)
+	// The API answers only its own page's JSON posts
+	json := map[string]string{"Origin": origin, "Content-Type": "application/json"}
+	for name, c := range map[string]struct {
+		headers map[string]string
+		want    int
+	}{
+		"no origin":    {map[string]string{"Content-Type": "application/json"}, http.StatusForbidden},
+		"other origin": {map[string]string{"Origin": "https://evil.example", "Content-Type": "application/json"}, http.StatusForbidden},
+		"a form post":  {map[string]string{"Origin": origin, "Content-Type": "application/x-www-form-urlencoded"}, http.StatusUnsupportedMediaType},
+		"rebinding":    {map[string]string{"Origin": origin, "Content-Type": "application/json", "Host": "evil.example"}, http.StatusForbidden},
+		"its own page": {json, http.StatusOK},
+	} {
+		if w := post(h, "/api/brokers/upstox/login", "{}", c.headers); w.Code != c.want {
+			t.Errorf("%s: %d, want %d", name, w.Code, c.want)
+		}
 	}
-	if w := call(h, "GET", "/assets/a.js", nil); w.Body.String() != "js" {
-		t.Errorf("asset: %q", w.Body)
-	}
-	if w := call(h, "GET", "/../../etc/passwd", nil); w.Code == 200 {
-		t.Error("path traversal served")
+	if w := call(h, "GET", "/callback/upstox?code=abc&state="+state, nil); w.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("cache %q", w.Header().Get("Cache-Control"))
 	}
 }
 
 func TestLogout(t *testing.T) {
+	ctx := context.Background()
 	active := func() *memStore {
 		s := newMem()
 		s.rows["upstox"] = Token{Broker: "upstox", UserID: "U", AccessToken: realToken, ExpiresAt: clock().Add(time.Hour)}
@@ -450,9 +426,9 @@ func TestLogout(t *testing.T) {
 	}
 	t.Run("revokes then deletes", func(t *testing.T) {
 		f, store := newFake(t), active()
-		h := newServer(f, store).Handler()
-		if w := call(h, "POST", "/api/brokers/upstox/logout", nil); w.Code != 200 {
-			t.Fatalf("%d %s", w.Code, w.Body)
+		s := newServer(f, store)
+		if err := Logout(ctx, store, s.Providers["upstox"], "upstox", clock()); err != nil {
+			t.Fatal(err)
 		}
 		if f.bearer != "Bearer "+realToken || f.revoked != 1 {
 			t.Errorf("bearer %q revoked %d", f.bearer, f.revoked)
@@ -460,7 +436,7 @@ func TestLogout(t *testing.T) {
 		if _, ok := store.rows["upstox"]; ok {
 			t.Error("row kept")
 		}
-		call(h, "POST", "/api/brokers/zerodha/logout", nil)
+		Logout(ctx, store, s.Providers["zerodha"], "zerodha", clock())
 		if f.deleteArgs.Get("access_token") != realToken || f.deleteArgs.Get("api_key") != "kitekey" {
 			t.Errorf("kite args %v", f.deleteArgs)
 		}
@@ -468,10 +444,10 @@ func TestLogout(t *testing.T) {
 	t.Run("failed revoke keeps the row", func(t *testing.T) {
 		f, store := newFake(t), active()
 		f.revoke = 500
-		h := newServer(f, store).Handler()
-		w := call(h, "POST", "/api/brokers/upstox/logout", nil)
-		if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "may still work") {
-			t.Fatalf("%d %s", w.Code, w.Body)
+		s := newServer(f, store)
+		err := Logout(ctx, store, s.Providers["upstox"], "upstox", clock())
+		if err == nil || !strings.Contains(err.Error(), "may still work") {
+			t.Fatal(err)
 		}
 		if _, ok := store.rows["upstox"]; !ok {
 			t.Error("row deleted though the token may still work")
@@ -482,7 +458,7 @@ func TestLogout(t *testing.T) {
 		tok := store.rows["upstox"]
 		tok.ExpiresAt = clock().Add(-time.Hour)
 		store.rows["upstox"] = tok
-		call(newServer(f, store).Handler(), "POST", "/api/brokers/upstox/logout", nil)
+		Logout(ctx, store, newServer(f, store).Providers["upstox"], "upstox", clock())
 		if f.revoked != 0 || store.rows["upstox"].Broker != "" {
 			t.Errorf("revoked %d rows %v", f.revoked, store.rows)
 		}
@@ -494,18 +470,18 @@ func TestNothingLeaksToTheBrowserOrLogs(t *testing.T) {
 	s := newServer(f, store)
 	h := s.Handler()
 	var seen strings.Builder
-	state := startLogin(t, h, "upstox")
+	state := startLogin(t, s, "upstox")
 	w := call(h, "GET", "/callback/upstox?code=abc&state="+state, nil)
 	seen.WriteString(w.Header().Get("Location") + w.Body.String())
-	seen.WriteString(call(h, "GET", "/api/brokers", nil).Body.String())
-	seen.WriteString(call(h, "POST", "/api/brokers/upstox/login", nil).Body.String())
+	b, _ := json.Marshal(s.Statuses(context.Background()))
+	seen.Write(b)
 	f.exchange = 400
-	state = startLogin(t, h, "upstox")
-	call(h, "GET", "/callback/upstox?code=abc&state="+state, nil)
-	seen.WriteString(call(h, "GET", "/api/brokers", nil).Body.String())
+	state = startLogin(t, s, "upstox")
+	seen.WriteString(call(h, "GET", "/callback/upstox?code=abc&state="+state, nil).Body.String())
+	seen.WriteString(s.LastError("upstox"))
 
 	tok := Token{Broker: "b", AccessToken: realToken}
-	b, _ := json.Marshal(tok)
+	b, _ = json.Marshal(tok)
 	seen.Write(b)
 	fmt.Fprintf(&seen, "%v %+v %#v %s", tok, tok, tok, tok.AccessToken)
 	seen.WriteString(fmt.Sprintf("%+v", s.Providers["upstox"]))
@@ -623,7 +599,7 @@ func TestLoadDotEnv(t *testing.T) {
 	}
 }
 
-func TestRunStopsWhenAllBrokersAreLoggedIn(t *testing.T) {
+func TestRunServesTheCallbackUntilCancelled(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -632,18 +608,16 @@ func TestRunStopsWhenAllBrokersAreLoggedIn(t *testing.T) {
 	ln.Close()
 	f, store := newFake(t), newMem()
 	s := newServer(f, store)
-	s.Addr, s.Grace, s.Idle, s.Now = a, 50*time.Millisecond, time.Hour, nil
-	delete(s.Providers, "zerodha")
+	s.Addr, s.Now = a, nil
 	s.Providers["upstox"].(*Upstox).Now = nil
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- s.Run(context.Background()) }()
-
-	base := "http://" + a
+	go func() { done <- s.Run(ctx) }()
+	state := startLogin(t, s, "upstox")
 	var resp *http.Response
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for range 100 {
-		req, _ := http.NewRequest("POST", base+"/api/brokers/upstox/login", nil)
-		req.Header.Set("Origin", base)
-		if resp, err = http.DefaultClient.Do(req); err == nil {
+		if resp, err = client.Get("http://" + a + "/callback/upstox?code=x&state=" + state); err == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -651,26 +625,18 @@ func TestRunStopsWhenAllBrokersAreLoggedIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var r struct{ URL string }
-	json.NewDecoder(resp.Body).Decode(&r)
 	resp.Body.Close()
-	u, _ := url.Parse(r.URL)
-	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	cb, err := noRedirect.Get(base + "/callback/upstox?code=x&state=" + u.Query().Get("state"))
-	if err != nil {
-		t.Fatal(err)
+	if resp.StatusCode != http.StatusSeeOther || !s.Done("upstox") || len(store.rows) != 1 {
+		t.Errorf("%d done=%v rows %v", resp.StatusCode, s.Done("upstox"), store.rows)
 	}
-	cb.Body.Close()
+	cancel()
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("server did not stop after the last login")
-	}
-	if len(store.rows) != 1 {
-		t.Errorf("rows %v", store.rows)
+		t.Fatal("server did not stop")
 	}
 }
 
@@ -698,5 +664,85 @@ func TestRunRefusesNonLoopback(t *testing.T) {
 	s := &Server{Addr: "0.0.0.0:8080"}
 	if err := s.Run(context.Background()); err == nil {
 		t.Error("wildcard address accepted")
+	}
+}
+
+func post(h http.Handler, path, body string, headers map[string]string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", "http://"+addr+path, strings.NewReader(body))
+	r.Host = addr
+	for k, v := range headers {
+		if k == "Host" {
+			r.Host = v
+			continue
+		}
+		r.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+// apiCall posts as the page does and returns its result, or fails the test.
+func apiCall(t *testing.T, h http.Handler, path, body string) json.RawMessage {
+	t.Helper()
+	w := post(h, path, body, map[string]string{"Origin": origin, "Content-Type": "application/json"})
+	var r struct {
+		OK     bool            `json:"ok"`
+		Result json.RawMessage `json:"result"`
+		Error  string          `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &r); err != nil || !r.OK {
+		t.Fatalf("%s: %d %s", path, w.Code, w.Body)
+	}
+	return r.Result
+}
+
+func TestThePageLogsInAndHandsTheLoginOn(t *testing.T) {
+	f, store := newFake(t), newMem()
+	s := newServer(f, store)
+	handed := make(chan string, 4)
+	s.After = func(_ context.Context, broker string, report func(Delivery)) {
+		report(Delivery{To: "calm", State: "sending"})
+		report(Delivery{To: "calm", State: "ok"})
+		report(Delivery{To: "hearth", State: "failed", Error: "hearth isn't running"})
+		handed <- broker
+	}
+	h := s.Handler()
+	var start struct{ URL string }
+	json.Unmarshal(apiCall(t, h, "/api/brokers/zerodha/login", "{}"), &start)
+	if !strings.HasPrefix(start.URL, f.URL) {
+		t.Fatalf("login url %q", start.URL)
+	}
+	if st := brokerState(t, s, "zerodha"); !st.Pending || st.Param != "request_token" {
+		t.Fatalf("not pending: %+v", st)
+	}
+	apiCall(t, h, "/api/brokers/zerodha/token", `{"value":"https://example.com/cb?request_token=reqtoken"}`)
+	if <-handed != "zerodha" {
+		t.Fatal("not handed on")
+	}
+	s.Settle()
+	st := brokerState(t, s, "zerodha")
+	if st.State != "active" || st.Pending || st.IssuedAt == nil || len(st.Sent) != 2 ||
+		st.Sent[0] != (Delivery{To: "calm", State: "ok"}) || st.Sent[1].State != "failed" {
+		t.Fatalf("after login %+v", st)
+	}
+	// Sent again from the page; then logged out, which forgets where it went
+	apiCall(t, h, "/api/brokers/zerodha/send", "{}")
+	<-handed
+	s.Settle()
+	apiCall(t, h, "/api/brokers/zerodha/logout", "{}")
+	if st := brokerState(t, s, "zerodha"); st.State != "logged_out" || len(st.Sent) != 0 || f.revoked == 0 {
+		t.Fatalf("after logout %+v (revoked %d)", st, f.revoked)
+	}
+	// A broker's refusal comes back as the page's error, and the login stays open to paste again
+	apiCall(t, h, "/api/brokers/upstox/login", "{}")
+	f.exchange = 400
+	w := post(h, "/api/brokers/upstox/token", `{"value":"abc"}`, map[string]string{"Origin": origin, "Content-Type": "application/json"})
+	if !strings.Contains(w.Body.String(), `"ok":false`) || !brokerState(t, s, "upstox").Pending {
+		t.Fatalf("refused paste: %s", w.Body)
+	}
+	apiCall(t, h, "/api/brokers/upstox/cancel", "{}")
+	if brokerState(t, s, "upstox").Pending {
+		t.Fatal("still pending after cancel")
 	}
 }

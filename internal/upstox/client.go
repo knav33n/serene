@@ -185,6 +185,9 @@ type Contract struct {
 	Strike  float64 `json:"strike_price"`
 	LotSize int64   `json:"lot_size"`
 	Weekly  bool    `json:"weekly"`
+	// Live contracts only: the most one order may carry, and the tick in paise.
+	FreezeQty float64 `json:"freeze_quantity"`
+	TickSize  float64 `json:"tick_size"`
 }
 
 // OptionContracts lists an expiry's contracts.

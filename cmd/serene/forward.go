@@ -241,23 +241,16 @@ func mcxForwardUnderlying(strat string) string {
 	return ""
 }
 
-// kiteClient is a Kite client on the stored Zerodha login, copying it from
-// project_calm first when CALM_DATABASE_URL is set.
+// kiteClient is a Kite client on the stored Zerodha login (serene auth).
 func kiteClient(ctx context.Context) (*kite.Client, error) {
 	tokens, err := openTokens(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tokens.Close()
-	if url := os.Getenv("CALM_DATABASE_URL"); url != "" {
-		if _, err := auth.ImportCalm(ctx, url, tokens); err != nil {
-			// The stored token may still work; a real failure shows below.
-			fmt.Fprintln(os.Stderr, "project_calm tokens not copied:", err)
-		}
-	}
 	token, err := auth.Load(ctx, tokens, "zerodha")
 	if err != nil {
-		return nil, fmt.Errorf("%w (log in to Kite in project_calm)", err)
+		return nil, fmt.Errorf("%w (log in with serene auth)", err)
 	}
 	apiKey := os.Getenv("ZERODHA_API_KEY")
 	if apiKey == "" {

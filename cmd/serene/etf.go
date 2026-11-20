@@ -21,13 +21,14 @@ import (
 // runETFFetch brings every NSE-traded ETF's daily and 1-minute files up to date.
 func runETFFetch(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("etf fetch", flag.ContinueOnError)
-	dir := fs.String("dir", "/run/media/naveen/Seagate Expansion Drive/INSIGHTS/etf", "output directory")
+	dir := fs.String("dir", "~/INSIGHTS/etf", "output directory")
 	data := fs.String("data", "data/equities", "equities data directory (the bhavcopy store)")
 	symbols := fs.String("symbols", "", "comma-separated current symbols, default all")
 	active := fs.Int("active-days", 45, "list ETFs traded in this many days before the newest bhavcopy day")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	*dir = expandHome(*dir)
 	f, err := etf.Open(*dir, filepath.Join(*data, "stocks", "year=*.parquet"))
 	if err != nil {
 		return err

@@ -68,7 +68,7 @@ func (c fyersConfig) all() ([]fyers.Underlying, error) {
 }
 
 func loadFyersConfig(path string) (fyersConfig, error) {
-	c := fyersConfig{Plan: "prime", Dir: "/run/media/naveen/Seagate Expansion Drive/INSIGHTS/fyers", BandPct: 5, Workers: 4}
+	c := fyersConfig{Plan: "prime", Dir: "~/INSIGHTS/fyers", BandPct: 5, Workers: 4}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, err
@@ -76,6 +76,7 @@ func loadFyersConfig(path string) (fyersConfig, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
+	c.Dir = expandHome(c.Dir)
 	return c, nil
 }
 
