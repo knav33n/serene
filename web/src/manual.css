@@ -20,8 +20,9 @@ main.desk { max-width: 1240px; padding: 22px 16px 72px; gap: 22px; }
 .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; padding-bottom: 18px; border-bottom: 1px solid var(--rule); }
 .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
 .brand h1 { font-size: clamp(26px, 3vw, 36px); font-stretch: 76%; }
-.brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 4px color-mix(in srgb, var(--up) 22%, transparent);
-  animation: pulse 2.4s ease-in-out infinite; }
+.brand .logo { flex: none; width: clamp(30px, 3vw, 38px); height: auto; }
+.brand .logo path:nth-of-type(3) { transform-origin: 16px 27px; animation: flicker 3.2s ease-in-out infinite; }
+@keyframes flicker { 0%, 100% { transform: scale(1, 1); } 40% { transform: scale(.96, 1.04); } 70% { transform: scale(1.03, .97); } }
 .chip { font: 600 11px/1 var(--mono); letter-spacing: .08em; padding: 5px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
 .daynet { display: grid; justify-items: end; line-height: 1.05; }
 .daynet .k { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); font-weight: 600; }
@@ -139,7 +140,7 @@ main.desk { max-width: 1240px; padding: 22px 16px 72px; gap: 22px; }
   .daynet { justify-items: start; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .brand .dot, .desk .msg { animation: none; }
+  .brand .logo path, .desk .msg { animation: none; }
   .ticket, .ticket::before, .sidebtn, .bpick, .desk button.b.buy, .refresh { transition: none; }
 }
 

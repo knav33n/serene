@@ -259,9 +259,9 @@ func runManual(ctx context.Context, args []string) error {
 		fmt.Printf("%s "+format+"\n", append([]any{time.Now().In(market.IST).Format("15:04:05")}, a...)...)
 	}}
 	if *public != "" {
-		fmt.Printf("Manual trades on http://%s, served as https://%s behind its login (REAL orders)\n", *addr, *public)
+		fmt.Printf("Hearth on http://%s, served as https://%s behind its login (REAL orders)\n", *addr, *public)
 	} else {
-		fmt.Printf("Manual trades on http://%s (REAL orders on Zerodha, Upstox, Fyers and ICICI; no password, so loopback only)\n", *addr)
+		fmt.Printf("Hearth on http://%s (REAL orders on Zerodha, Upstox, Fyers and ICICI; no password, so loopback only)\n", *addr)
 	}
 	return srv.Run(ctx)
 }

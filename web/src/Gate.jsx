@@ -1,6 +1,6 @@
 // The public page's login (serene manual --public): a password and the authenticator's 6 digits.
 import { useState } from "react";
-import { api } from "./ui.jsx";
+import { Logo, api } from "./ui.jsx";
 
 export default function Gate({ onIn }) {
   const [pw, setPw] = useState("");
@@ -26,7 +26,7 @@ export default function Gate({ onIn }) {
 
   return <main className="gate">
     <form className="gatecard" onSubmit={submit}>
-      <div className="brand"><span className="dot" /><h1>Manual Trades</h1></div>
+      <div className="brand"><Logo /><h1>Hearth</h1></div>
       <label className="f"><span>Password</span>
         <input type="password" autoComplete="current-password" autoFocus value={pw} onChange={e => setPw(e.target.value)} /></label>
       <label className="f big"><span>Code</span>

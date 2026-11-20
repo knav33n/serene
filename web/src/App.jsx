@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Manual, { rupees } from "./Manual.jsx";
 import Gate from "./Gate.jsx";
-import { Message, Say, Spin, api } from "./ui.jsx";
+import { Logo, Message, Say, Spin, api } from "./ui.jsx";
 import { ThemeSwitch } from "./theme.jsx";
 
 export default function App() {
@@ -45,7 +45,7 @@ export default function App() {
   return <Say.Provider value={say}>
     <main className="desk">
       <header className="topbar">
-        <div className="brand"><span className="dot" /><h1>Manual Trades</h1><span className="chip">NIFTY</span></div>
+        <div className="brand"><Logo /><h1>Hearth</h1><span className="chip">NIFTY</span></div>
         <div className="daynet">
           <span className="k">Day net</span>
           <span className={"v " + (net > 0 ? "up" : net < 0 ? "down" : "")}>{net == null ? "–" : rupees(net)}</span>

@@ -38,3 +38,14 @@ export function Button({ onClick, className = "b", disabled, children, ...rest }
 
 export const Spin = () => <span className="spin" />;
 export const Wait = ({ on, children }) => <span className="wait">{on && <><Spin />{children}</>}</span>;
+
+// Hearth's mark: a fireplace arch on its hearthstone with a flame inside.
+// The arch takes the ink and the flame the marigold accent, so it follows the theme.
+export function Logo({ size = 32 }) {
+  return <svg className="logo" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+    <path d="M7 27V15a9 9 0 0 1 18 0v12" fill="none" stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="round" />
+    <path d="M3.5 27.5h25" stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="round" />
+    <path d="M16 11.5c0 0 5.6 4.9 5.6 9.6a5.6 5.6 0 0 1-11.2 0c0-2.4 1.5-4.4 2.9-5.7.1 1.5.8 2.6 1.8 3.1-.3-2.8.2-5 .9-7z" fill="var(--accent)" />
+    <path d="M16 19.2c0 0 2.4 1.9 2.4 3.9a2.4 2.4 0 0 1-4.8 0c0-2 2.4-3.9 2.4-3.9z" fill="color-mix(in srgb, var(--accent) 45%, var(--panel))" />
+  </svg>;
+}
