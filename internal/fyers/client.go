@@ -53,7 +53,17 @@ type Client struct {
 func New(appID string, token auth.Secret, lim *Limiter) *Client {
 	return &Client{AppID: appID, Token: token, DataURL: "https://api-t1.fyers.in/data",
 		PublicURL: "https://public.fyers.in", Limiter: lim, Backoff: 5 * time.Second,
-		HTTP: &http.Client{Timeout: 90 * time.Second}}
+		HTTP: &http.Client{Timeout: 90 * time.Second, Transport: transport()}}
+}
+
+// transport pings idle HTTP/2 connections so a dead one is dropped within
+// seconds. Without it, when the machine's address changes (as the mobile link
+// does), every request queues on the old connection until the kernel gives up
+// on it, about 13 minutes on 2026-11-20.
+func transport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.HTTP2 = &http.HTTP2Config{SendPingTimeout: 15 * time.Second, PingTimeout: 10 * time.Second}
+	return t
 }
 
 // attempts is how many times a request meets a network or server error before
