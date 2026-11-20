@@ -47,12 +47,13 @@ for u in serene-*.service; do
   systemctl restart "$u"
 done
 
-# The manual page is every path no other project's /etc/caddy/hearth/*.caddy claims: their
+# The manual page (on 8768: project_calm's old calm-manual held 8767) is every path no other
+# project's /etc/caddy/hearth/*.caddy claims: their
 # handle_path /<project>/* blocks match first, this unmatched handle takes the rest (the home page).
 site=/etc/caddy/hearth/serene.caddy
 want="# Written by serene's deploy/hearth/host.sh: the manual trades page (serene-manual) at /
 handle {
-	reverse_proxy 127.0.0.1:8767
+	reverse_proxy 127.0.0.1:8768
 }"
 if [[ "$(cat $site 2> /dev/null)" != "$want" ]]; then
   [[ ! -f $site ]] || cp $site $site.old
