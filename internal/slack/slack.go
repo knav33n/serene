@@ -115,6 +115,21 @@ func (c *Client) Post(ctx context.Context, channel, text string) error {
 	return c.call(ctx, "chat.postMessage", map[string]string{"channel": channel, "text": text}, nil)
 }
 
+// PostBlocks sends a message laid out with Block Kit blocks; text is the
+// notification and fallback. It returns the message's ts.
+func (c *Client) PostBlocks(ctx context.Context, channel, text string, blocks []Block) (string, error) {
+	var out struct {
+		TS string `json:"ts"`
+	}
+	err := c.call(ctx, "chat.postMessage", map[string]any{"channel": channel, "text": text, "blocks": blocks}, &out)
+	return out.TS, err
+}
+
+// Reply posts text in the thread under the message ts.
+func (c *Client) Reply(ctx context.Context, channel, ts, text string) error {
+	return c.call(ctx, "chat.postMessage", map[string]string{"channel": channel, "thread_ts": ts, "text": text}, nil)
+}
+
 // maxAlt is Slack's limit on alt text.
 const maxAlt = 1000
 

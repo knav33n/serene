@@ -180,6 +180,7 @@ func runManual(ctx context.Context, args []string) error {
 		"needs SERENE_MANUAL_PASSWORD and SERENE_MANUAL_TOTP from serene manual setup, and SERENE_TOKEN_KEY")
 	costsPath := fs.String("costs", "configs/costs.yaml", "charges schedule, for sizing and the target")
 	useSlack := fs.Bool("slack", false, "post buys and square-offs to SLACK_CHANNEL")
+	dryRun := fs.Bool("slack-dry-run", false, "Slack's futures buttons check the order on Kite and reply, but place nothing")
 	wait := fs.Duration("limit-wait", 60*time.Second, "how long a LIMIT buy waits before what's left is cancelled")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -249,15 +250,30 @@ func runManual(ctx context.Context, args []string) error {
 		Notify:    notify,
 		LimitWait: *wait,
 	}
+	logf := func(format string, a ...any) {
+		fmt.Printf("%s "+format+"\n", append([]any{time.Now().In(market.IST).Format("15:04:05")}, a...)...)
+	}
+	var slackActions *manual.SlackActions
+	if *useSlack {
+		if slackActions, err = futButtons(cl, logf, *dryRun); err != nil {
+			return err
+		}
+	}
 	var gate *manual.Gate
 	if *public != "" {
 		if gate, err = manualGate(); err != nil {
 			return err
 		}
 	}
-	srv := &manual.Server{Addr: *addr, Public: *public, Gate: gate, Desk: desk, UI: web.Dist(), Log: func(format string, a ...any) {
-		fmt.Printf("%s "+format+"\n", append([]any{time.Now().In(market.IST).Format("15:04:05")}, a...)...)
-	}}
+	srv := &manual.Server{Addr: *addr, Public: *public, Gate: gate, Desk: desk, UI: web.Dist(), Log: logf}
+	if slackActions != nil {
+		srv.Slack = slackActions
+		if *dryRun {
+			fmt.Println("Slack futures buttons on POST /slack/actions (dry run: nothing is placed)")
+		} else {
+			fmt.Println("Slack futures buttons on POST /slack/actions (REAL Zerodha orders)")
+		}
+	}
 	if *public != "" {
 		fmt.Printf("Hearth on http://%s, served as https://%s behind its login (REAL orders)\n", *addr, *public)
 	} else {

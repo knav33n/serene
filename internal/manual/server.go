@@ -24,8 +24,11 @@ type Server struct {
 	Public string // the host it's also served as, over HTTPS, e.g. hearth.naveenkumar.dev; needs Gate
 	Gate   *Gate
 	Desk   *Desk
-	UI     fs.FS
-	Log    func(format string, a ...any)
+	// Slack, when set, takes Slack's button clicks at POST /slack/actions.
+	// Slack signs them, so they skip the page's login and Origin checks.
+	Slack http.Handler
+	UI    fs.FS
+	Log   func(format string, a ...any)
 }
 
 func (s *Server) logf(format string, a ...any) {
@@ -63,7 +66,13 @@ func (s *Server) Handler() http.Handler {
 		return s.Desk.Exit(ctx, r.Broker, r.Symbol, r.Exchange, r.Product)
 	}))
 	mux.HandleFunc("GET /", s.page)
-	return s.guard(mux)
+	if s.Slack == nil {
+		return s.guard(mux)
+	}
+	top := http.NewServeMux()
+	top.Handle("POST /slack/actions", s.Slack)
+	top.Handle("/", s.guard(mux))
+	return top
 }
 
 // origin is the page's own origin for the Host it was asked on.

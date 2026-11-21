@@ -204,12 +204,24 @@ func forwardSignals(ctx context.Context, client *slack.Client, route func(strate
 		}
 		byChannel[c] = append(byChannel[c], s)
 	}
-	// Slack's message limit is about 40k characters; batch well under it.
+	buttons := newFutContracts(os.Getenv("SLACK_ORDER_USERS") != "")
+	now := time.Now()
+	markSent := func(batch []fwdSignal) error {
+		for _, s := range batch {
+			sent[s.id()] = true
+		}
+		// Saved after each message, so a failure part-way doesn't repost.
+		return saveSent(sentPath, sent)
+	}
+	// Slack's message limit is about 40k characters; batch well under it. A
+	// fresh signal with buttons goes in a message of its own.
 	const perMessage = 40
 	for _, c := range channels {
-		sigs := byChannel[c]
-		for i := 0; i < len(sigs); i += perMessage {
-			batch := sigs[i:min(i+perMessage, len(sigs))]
+		var batch []fwdSignal
+		flush := func() error {
+			if len(batch) == 0 {
+				return nil
+			}
 			lines := make([]string, len(batch))
 			for j, s := range batch {
 				lines[j] = s.text()
@@ -217,13 +229,32 @@ func forwardSignals(ctx context.Context, client *slack.Client, route func(strate
 			if err := client.Post(ctx, c, strings.Join(lines, "\n")); err != nil {
 				return err
 			}
-			for _, s := range batch {
-				sent[s.id()] = true
+			err := markSent(batch)
+			batch = nil
+			return err
+		}
+		for _, s := range byChannel[c] {
+			if row := buttons.row(ctx, s, now); row != nil {
+				if err := flush(); err != nil {
+					return err
+				}
+				if _, err := client.PostBlocks(ctx, c, s.text(), []slack.Block{slack.SectionBlock(s.text()), row}); err != nil {
+					return err
+				}
+				if err := markSent([]fwdSignal{s}); err != nil {
+					return err
+				}
+				continue
 			}
-			// Saved after each message, so a failure part-way doesn't repost.
-			if err := saveSent(sentPath, sent); err != nil {
-				return err
+			batch = append(batch, s)
+			if len(batch) == perMessage {
+				if err := flush(); err != nil {
+					return err
+				}
 			}
+		}
+		if err := flush(); err != nil {
+			return err
 		}
 	}
 	fmt.Printf("posted %d signal(s)\n", len(fresh))
