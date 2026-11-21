@@ -155,7 +155,7 @@ func (f *futContracts) row(ctx context.Context, s fwdSignal, now time.Time) slac
 	futs = futs[:min(2, len(futs))]
 	syms, labels := make([]string, len(futs)), make([]string, len(futs))
 	for i, c := range futs {
-		syms[i], labels[i] = c.Symbol, c.Expiry.String()
+		syms[i], labels[i] = c.Symbol, fmt.Sprintf("%02d/%02d/%04d", c.Expiry.Day, int(c.Expiry.Month), c.Expiry.Year)
 	}
 	return manual.FutButtons(s.Strategy, syms, labels)
 }
