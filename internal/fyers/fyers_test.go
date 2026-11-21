@@ -215,6 +215,7 @@ func TestFatalErrorsAreNotRetried(t *testing.T) {
 		"rate limit code":   {200, `{"s":"error","code":-429,"message":"limit"}`, ErrRateLimited},
 		"expired token":     {200, `{"s":"error","code":-8,"message":"expired"}`, ErrAuth},
 		"unauthorised":      {401, `{"s":"error","code":-16,"message":"no"}`, ErrAuth},
+		"delisted spot":     {422, `{"s":"error","code":-300,"message":"Invalid symbol provided"}`, ErrNoData},
 	} {
 		n := 0
 		c := serve(t, func(w http.ResponseWriter, r *http.Request) {

@@ -28,7 +28,8 @@ var (
 	ErrServer      = errors.New("fyers server error")
 	// ErrNoData is Fyers' code -50 "Invalid input", which it returns for a
 	// range before a series starts and for a symbol it doesn't know, such as a
-	// delisted stock's spot or a strike that never listed.
+	// strike that never listed, and code -300 "Invalid symbol provided", which
+	// it returns for a delisted or renamed stock's spot (NSE:ALBK-EQ).
 	ErrNoData = errors.New("fyers has no such data")
 	// ErrBroken is Fyers' code -99 "Something went wrong", which it returns
 	// every time for some ranges of some expired contracts: retrying the same
@@ -140,7 +141,7 @@ func (c *Client) once(ctx context.Context, path string, q url.Values, expiredInt
 		return false, json.Unmarshal(body, out)
 	case env.Code == -99:
 		return false, fmt.Errorf("%w: HTTP %d code %d %s", ErrBroken, resp.StatusCode, env.Code, env.Message)
-	case env.Code == -50:
+	case env.Code == -50 || env.Code == -300:
 		return false, fmt.Errorf("%w: HTTP %d code %d %s", ErrNoData, resp.StatusCode, env.Code, env.Message)
 	case resp.StatusCode != http.StatusOK || env.S != "ok":
 		return false, fmt.Errorf("fyers %s: HTTP %d code %d %s", path, resp.StatusCode, env.Code, env.Message)
