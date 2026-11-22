@@ -204,27 +204,35 @@ func hmaCrossText(c paper.Cross, cfg paper.CrossConfig) string {
 		c.Time.In(market.IST).Format("15:04"), c.End.In(market.IST).Format("15:04"))
 }
 
-// hmaCrossButtons is the cross's one button, for the crossing leg only: an
-// up-cross buys a lot of it, a down-cross sells what is held of it.
+// hmaCrossButtons is Buy CE and Buy PE on every cross, the crossing leg's
+// buy green on an up-cross, and on a down-cross a red Sell for the crossing
+// leg, which sells what is held of it.
 func hmaCrossButtons(st *paperDayState, c paper.Cross) slack.Block {
-	sym := ""
+	var bs []manual.OrderButton
+	var sell *manual.OrderButton
 	for _, l := range st.Legs {
+		r := string(l.Right)
+		b := manual.OrderButton{Order: manual.FutOrder{Strategy: paper.HMACrossName, Side: market.Buy, Symbol: l.Symbol},
+			Text:    "Buy " + r,
+			Confirm: fmt.Sprintf("*BUY 1 lot (%d qty) %s* on Zerodha at market (MIS), for %s.", st.Lot, l.Symbol, paper.HMACrossName)}
 		if l.Right == c.Instrument.Right {
-			sym = l.Symbol
+			if c.Up {
+				b.Style = "primary"
+			} else {
+				sell = &manual.OrderButton{Order: manual.FutOrder{Strategy: paper.HMACrossName, Side: market.Sell, Symbol: l.Symbol},
+					Text: "Sell " + r, Style: "danger",
+					Confirm: fmt.Sprintf("*SELL all the MIS %s you hold* on Zerodha at market, for %s.", l.Symbol, paper.HMACrossName)}
+			}
 		}
+		bs = append(bs, b)
 	}
-	if sym == "" {
+	if len(bs) == 0 {
 		return nil
 	}
-	r := string(c.Instrument.Right)
-	b := manual.OrderButton{Order: manual.FutOrder{Strategy: paper.HMACrossName, Side: market.Buy, Symbol: sym},
-		Text: "Buy " + r, Style: "primary",
-		Confirm: fmt.Sprintf("*BUY 1 lot (%d qty) %s* on Zerodha at market (MIS), for %s.", st.Lot, sym, paper.HMACrossName)}
-	if !c.Up {
-		b.Order.Side, b.Text, b.Style = market.Sell, "Sell "+r, "danger"
-		b.Confirm = fmt.Sprintf("*SELL all the MIS %s you hold* on Zerodha at market, for %s.", sym, paper.HMACrossName)
+	if sell != nil {
+		bs = append(bs, *sell)
 	}
-	return manual.OrderButtons(b)
+	return manual.OrderButtons(bs...)
 }
 
 // optBroker is the part of Kite placeOpt uses, so tests can fake it.

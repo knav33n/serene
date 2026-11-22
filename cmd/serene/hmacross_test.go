@@ -115,14 +115,18 @@ func TestHMACrossButtonsDedicated(t *testing.T) {
 		}{market.Put, 2, "NIFTYPE"})
 	d := market.Date{Year: 2026, Month: time.November, Day: 23}
 	pe := market.Option(market.NFO, "NIFTY", d, market.Rupees(26000), market.Put, 65)
-	for _, tc := range []struct {
-		up   bool
-		want string
-	}{{true, "nifty_hma_crossover|BUY|NIFTYPE"}, {false, "nifty_hma_crossover|SELL|NIFTYPE"}} {
-		b, _ := json.Marshal(hmaCrossButtons(st, paper.Cross{Instrument: pe, Up: tc.up}))
-		s := string(b)
-		if strings.Count(s, `"type":"button"`) != 1 || !strings.Contains(s, tc.want) || strings.Contains(s, "NIFTYCE") {
-			t.Errorf("up=%v: want one %s button, got %s", tc.up, tc.want, s)
+	up, _ := json.Marshal(hmaCrossButtons(st, paper.Cross{Instrument: pe, Up: true}))
+	down, _ := json.Marshal(hmaCrossButtons(st, paper.Cross{Instrument: pe, Up: false}))
+	for _, s := range []string{string(up), string(down)} {
+		if !strings.Contains(s, "nifty_hma_crossover|BUY|NIFTYCE") || !strings.Contains(s, "nifty_hma_crossover|BUY|NIFTYPE") {
+			t.Errorf("want Buy CE and Buy PE on every cross, got %s", s)
 		}
+	}
+	if strings.Count(string(up), `"type":"button"`) != 2 || strings.Contains(string(up), "SELL") {
+		t.Errorf("up-cross: want just the two buys, got %s", up)
+	}
+	if strings.Count(string(down), `"type":"button"`) != 3 || !strings.Contains(string(down), "nifty_hma_crossover|SELL|NIFTYPE") ||
+		strings.Contains(string(down), "SELL|NIFTYCE") {
+		t.Errorf("down-cross on the PE: want the buys and Sell PE, got %s", down)
 	}
 }
