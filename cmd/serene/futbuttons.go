@@ -15,6 +15,7 @@ import (
 	"serene/internal/kite"
 	"serene/internal/manual"
 	"serene/internal/market"
+	"serene/internal/paper"
 	"serene/internal/slack"
 )
 
@@ -69,6 +70,9 @@ func futButtons(cl *clients, logf func(string, ...any), dryRun bool) (*manual.Sl
 			if err != nil {
 				return "", err
 			}
+			if o.Strategy == paper.HMACrossName {
+				return placeOpt(ctx, kc, o, time.Now(), dryRun)
+			}
 			return placeFut(ctx, kc, o, time.Now(), dryRun)
 		}}, nil
 }
@@ -102,23 +106,7 @@ func placeFut(ctx context.Context, kc *kite.Client, o manual.FutOrder, now time.
 	if err != nil {
 		return "", err
 	}
-	what := fmt.Sprintf("%s 1 lot %s on Zerodha (order %s)", side, o.Symbol, id)
-	var st kite.Order
-	for range 15 {
-		if err := sleepCtx(ctx, 2*time.Second); err != nil {
-			break
-		}
-		if st, err = kc.OrderStatus(ctx, id); err != nil {
-			continue
-		}
-		switch strings.ToUpper(st.Status) {
-		case "COMPLETE":
-			return fmt.Sprintf(":white_check_mark: %s filled @ ₹%.2f", what, st.Average), nil
-		case "REJECTED", "CANCELLED":
-			return "", fmt.Errorf("%s %s: %s", what, strings.ToLower(st.Status), st.StatusMessage)
-		}
-	}
-	return fmt.Sprintf(":hourglass: %s placed; status %s after 30s, check Kite", what, st.Status), nil
+	return awaitFill(ctx, kc, id, fmt.Sprintf("%s 1 lot %s on Zerodha (order %s)", side, o.Symbol, id))
 }
 
 // futContracts gives a fresh signal its buttons: buy and sell on the current

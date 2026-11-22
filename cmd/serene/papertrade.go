@@ -2,21 +2,16 @@ package main
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"time"
 
-	"serene/internal/cost"
 	"serene/internal/kite"
 	"serene/internal/market"
-	"serene/internal/paper"
-	"serene/internal/slack"
 )
 
 // niftyIndexToken is Kite's instrument token for the NIFTY 50 index.
@@ -35,131 +30,6 @@ type paperDayState struct {
 		Token  int64        `json:"token"`
 		Symbol string       `json:"symbol"`
 	} `json:"legs"`
-}
-
-// runPaper paper trades nifty_hma_retest: each run fetches today's NIFTY
-// open and the two ATM options' minute bars from Kite, replays the day and
-// posts the entry and exit once each. No order goes to a broker.
-func runPaper(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("paper hmaretest", flag.ContinueOnError)
-	useSlack := fs.Bool("slack", false, "post new entries and exits to SLACK_PAPER_CHANNEL")
-	date := fs.String("date", "", "day to replay (default today, IST)")
-	dir := fs.String("dir", "data/paper", "per-day contract choices")
-	sentPath := fs.String("sent", "data/paper_sent.json", "events already posted")
-	alertPath := fs.String("alert", "data/paper_alert.json", "whether a failure has been posted")
-	costsFile := fs.String("costs", "configs/costs.yaml", "NFO charges schedule")
-	report := fs.String("report", "reports/paper_hmaretest.csv", "closed trades, appended as they are posted")
-	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
-	from := fs.String("from", "2026-11-13", "first day of the paper trade; earlier days post nothing")
-	liveBrokers := fs.String("live", "", "also trade with real orders on these accounts: zerodha,upstox")
-	capital := fs.Float64("capital", 100000, "the most a live trade spends, in rupees; less if the account has less")
-	maxQty := fs.Int64("max-qty", 1755, "the largest live order, within NIFTY's freeze quantity")
-	liveDir := fs.String("live-dir", "data/live", "live order state; a STOP file here stops new entries")
-	liveReport := fs.String("live-report", "reports/live_hmaretest.csv", "closed live trades")
-	check := fs.Bool("check", false, "with --live: show each account's funds, positions and orders, and place nothing")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	brokers, err := parseBrokers(*liveBrokers)
-	if err != nil {
-		return err
-	}
-	lo := liveOpts{brokers: brokers, capital: market.Rupees(*capital), maxQty: *maxQty, dir: *liveDir, report: *liveReport}
-	if *check {
-		return liveCheck(ctx, brokers, *dir, *step)
-	}
-	now := time.Now().In(market.IST)
-	d := market.DateOf(now)
-	if *date != "" {
-		var err error
-		if d, err = market.ParseDate(*date); err != nil {
-			return err
-		}
-	}
-	start, err := market.ParseDate(*from)
-	if err != nil {
-		return err
-	}
-	if d.Before(start) {
-		fmt.Println("the paper trade starts", start)
-		return nil
-	}
-	if !market.NSETradingDay(d) {
-		fmt.Println(d, "is not an NSE trading day")
-		return nil
-	}
-	if now.Before(d.At(9, 16)) {
-		fmt.Println("before the first bar of", d)
-		return nil
-	}
-	var client *slack.Client
-	var channel string
-	if *useSlack {
-		if client, channel, err = openSlackChannel(ctx, "SLACK_PAPER_CHANNEL"); err != nil {
-			return err
-		}
-	}
-	err = paperHMARetest(ctx, client, channel, d, now, *dir, *sentPath, *costsFile, *report, *step, lo)
-	alertOnce(ctx, client, channel, *alertPath, "serene paper "+paper.HMARetestName, err)
-	return err
-}
-
-func paperHMARetest(ctx context.Context, client *slack.Client, channel string, d market.Date, now time.Time,
-	dir, sentPath, costsFile, report string, step float64, lo liveOpts) error {
-	costs, err := cost.Load(costsFile)
-	if err != nil {
-		return err
-	}
-	kc, err := kiteClient(ctx)
-	if err != nil {
-		return err
-	}
-	st, err := paperDay(ctx, kc, d, now, dir, step)
-	if err != nil || st == nil {
-		return err
-	}
-	prev := d.AddDays(-1)
-	for !market.NSETradingDay(prev) {
-		prev = prev.AddDays(-1)
-	}
-	var legs []paper.Leg
-	for _, l := range st.Legs {
-		inst := market.Option(market.NFO, "NIFTY", st.Expiry, market.Rupees(st.Strike), l.Right, st.Lot)
-		cs, err := kc.Candles(ctx, l.Token, "minute", prev.At(9, 15), earlier(now, d.At(15, 40)), false)
-		if err != nil {
-			return fmt.Errorf("%s candles: %w", l.Symbol, err)
-		}
-		var bars []market.Bar
-		for _, c := range cs {
-			t := c.Time.In(market.IST)
-			b := market.Bar{Key: inst.Key(), Timeframe: market.Minute1, Time: t, End: t.Add(time.Minute),
-				Open: market.Rupees(c.Open), High: market.Rupees(c.High), Low: market.Rupees(c.Low),
-				Close: market.Rupees(c.Close), Volume: c.Volume, OI: c.OI}
-			// Only whole minutes: Kite includes the one still forming.
-			if b.End.After(now) {
-				continue
-			}
-			if bd := market.DateOf(t); bd == d || bd == prev {
-				bars = append(bars, b)
-			}
-		}
-		legs = append(legs, paper.Leg{Instrument: inst, Bars: bars})
-	}
-	if len(lo.brokers) > 0 {
-		// Each broker's failure is alerted on its own, apart from the paper trade's.
-		if err := liveHMARetest(ctx, client, channel, kc, st, legs, costs, d, now, lo); err != nil {
-			fmt.Fprintln(os.Stderr, "live:", err)
-		}
-	}
-	tr, err := paper.HMARetest(legs, paper.DefaultHMARetest(d))
-	if err != nil {
-		return err
-	}
-	if tr == nil {
-		fmt.Printf("%s: no entry yet (watching NIFTY %s CE/PE, exp %s)\n", d, market.Rupees(st.Strike), st.Expiry)
-		return nil
-	}
-	return postPaper(ctx, client, channel, tr, costs, sentPath, report)
 }
 
 // paperDay loads or makes the day's contract choice. It is nil, with no
@@ -213,98 +83,6 @@ func paperDay(ctx context.Context, kc *kite.Client, d market.Date, now time.Time
 
 func paperName(in market.Instrument) string {
 	return fmt.Sprintf("NIFTY %s %s (exp %s)", in.Strike, in.Right, in.Expiry)
-}
-
-func postPaper(ctx context.Context, client *slack.Client, channel string, tr *paper.Trade, costs *cost.Schedule,
-	sentPath, report string) error {
-	sent, err := loadSent(sentPath)
-	if err != nil {
-		return err
-	}
-	name := paperName(tr.Instrument)
-	type event struct{ id, text string }
-	at := func(t time.Time) string { return t.In(market.IST).Format("2006-01-02 15:04") }
-	evs := []event{{
-		id: fmt.Sprintf("%s|entry|%s|%s", paper.HMARetestName, tr.Instrument.Key(), tr.EntryTime.UTC().Format(time.RFC3339)),
-		text: fmt.Sprintf(":large_green_circle: *%s* BUY %s @ ₹%s · %d lots (%d qty) · SL ₹%s · %s",
-			paper.HMARetestName, name, tr.Entry, tr.Lots, tr.Qty, tr.Stop, at(tr.EntryTime)),
-	}}
-	var row []string
-	if !tr.Open {
-		in, err := costs.Charges(market.Fill{Instrument: tr.Instrument, Side: market.Buy, Qty: tr.Qty, Price: tr.Entry, Time: tr.EntryTime, Kind: market.Traded})
-		if err != nil {
-			return err
-		}
-		out, err := costs.Charges(market.Fill{Instrument: tr.Instrument, Side: market.Sell, Qty: tr.Qty, Price: tr.Exit, Time: tr.ExitTime, Kind: market.Traded})
-		if err != nil {
-			return err
-		}
-		gross := (tr.Exit - tr.Entry) * market.Paise(tr.Qty)
-		net := gross - in - out
-		sign := "+"
-		if net < 0 {
-			sign = ""
-		}
-		evs = append(evs, event{
-			id: fmt.Sprintf("%s|exit|%s|%s", paper.HMARetestName, tr.Instrument.Key(), tr.ExitTime.UTC().Format(time.RFC3339)),
-			text: fmt.Sprintf(":red_circle: *%s* SELL %s @ ₹%s · %s (SL ₹%s) · P&L ₹%s%s after ₹%s charges · %s",
-				paper.HMARetestName, name, tr.Exit, tr.Reason, tr.LastStop, sign, net, in+out, at(tr.ExitTime)),
-		})
-		row = []string{tr.EntryTime.In(market.IST).Format("2006-01-02"), name, at(tr.EntryTime), tr.Entry.String(),
-			fmt.Sprint(tr.Lots), fmt.Sprint(tr.Qty), tr.Stop.String(), at(tr.ExitTime), tr.Exit.String(), tr.Reason,
-			tr.LastStop.String(), gross.String(), (in + out).String(), net.String()}
-	}
-	fresh := 0
-	for _, e := range evs {
-		if sent[e.id] {
-			continue
-		}
-		fresh++
-		fmt.Println(e.text)
-		if client == nil {
-			continue
-		}
-		if err := client.Post(ctx, channel, e.text); err != nil {
-			return err
-		}
-		sent[e.id] = true
-		if err := saveSent(sentPath, sent); err != nil {
-			return err
-		}
-		if row != nil && e.id == evs[len(evs)-1].id {
-			if err := appendPaperRow(report, row); err != nil {
-				return err
-			}
-		}
-	}
-	switch {
-	case fresh == 0:
-		fmt.Println("no new events")
-	case client == nil:
-		fmt.Printf("%d new event(s); --slack posts them\n", fresh)
-	}
-	return nil
-}
-
-var paperHeader = []string{"day", "contract", "entry_time", "entry", "lots", "qty", "stop", "exit_time", "exit",
-	"reason", "last_stop", "gross", "charges", "net"}
-
-func appendPaperRow(path string, row []string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	isNew := !fileExists(path)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	w := csv.NewWriter(f)
-	if isNew {
-		_ = w.Write(paperHeader)
-	}
-	_ = w.Write(row)
-	w.Flush()
-	return errors.Join(w.Error(), f.Close())
 }
 
 func readJSONFile(path string, v any) (bool, error) {

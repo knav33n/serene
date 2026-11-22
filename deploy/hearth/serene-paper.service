@@ -1,5 +1,5 @@
 [Unit]
-Description=serene nifty_hma_retest: paper trade and real orders on Zerodha, to Slack
+Description=serene nifty_hma_crossover: 10m HMA 13/34 crosses of the ATM NIFTY CE/PE, to Slack with buy/sell buttons (no orders of its own)
 Wants=network-online.target
 After=network-online.target postgresql.service
 
@@ -8,5 +8,5 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-ExecStart=/home/serene/app/serene paper hmaretest --slack --live zerodha
+ExecStart=/home/serene/app/serene paper hmacross --slack
 TimeoutStartSec=5min

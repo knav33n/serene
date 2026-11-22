@@ -71,7 +71,7 @@ const usage = `serene researches and trades Indian index options.
   serene research mcxemafwd   [--to DATE] [--judge] [--replay]   (frozen GOLDM 15m 13/34, sessions from 2026-11-11)
   serene research silvermfwd  [--strategy silverm_ema_15m|silverm_hma_1h] [--to DATE] [--judge] [--replay]   (frozen GOLDM rules on SILVERM, sessions from 2026-11-12)
   serene research mcxdow      [--names A,B] [--from DATE] [--to DATE] [--frame 1h] [--lookback 720h] [--multiple 2.5] [--slip-ticks 1] [--trades FILE]
-  serene research hmaretest   [--from DATE] [--to DATE] [--unseal] [--slip-bps 30] [--step 100] [--trades FILE]
+  serene research hmaretest   [--from DATE] [--to DATE] [--unseal] [--slip-bps 30] [--step 100] [--trades FILE] [--tf 10] [--warm 4] [--immediate] [--grid]
   serene research pdbreak     [--from DATE] [--to DATE] [--split 2025-09-01] [--offset-pct 1] [--slip-bps 30] [--trades FILE]
   serene research pdlswing    [--from DATE] [--to DATE] [--split 2025-09-01] [--draws 200] [--slip-bps 30] [--trades FILE]   (PDL-break put swing, 3-day hold)
   serene research dayfeatures [--from DATE] [--to DATE] [--data DIR] [--market DIR] [--out reports/dayfeatures.csv]
@@ -105,7 +105,7 @@ const usage = `serene researches and trades Indian index options.
 
   serene backup               [--dry-run] [--config configs/backup.yaml]   (mirror data/ and ~/INSIGHTS onto the Seagate drive; run at end of day)
 
-  serene paper hmaretest      [--slack] [--date DATE] [--step 100]   (paper trade nifty_hma_retest; entries/exits with P&L)
+  serene paper hmacross       [--slack] [--date DATE] [--step 100] [--warm 4]   (nifty_hma_crossover: every 10m HMA 13/34 cross of the ATM CE/PE, with Zerodha buttons; no orders of its own)
   serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
 
 Not built yet:
@@ -273,8 +273,8 @@ func run(ctx context.Context, args []string) error {
 		return runFyers(ctx, args[1], rest)
 	case "forward signals":
 		return runForwardSignals(ctx, rest)
-	case "paper hmaretest":
-		return runPaper(ctx, rest)
+	case "paper hmacross":
+		return runHMACross(ctx, rest)
 	case "live mcx":
 		return runLiveMCX(ctx, rest)
 	case "paper pdlswing":

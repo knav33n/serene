@@ -39,6 +39,10 @@ type Config struct {
 	Exit                 time.Duration // after the open: the time exit, at that bar's open
 	Capital              market.Paise
 	Tick                 market.Paise
+	// Immediate buys at the open of the bar after the cross instead of a
+	// limit at the slow HMA. With no swing low of today below the fill, the
+	// stop is today's lowest low before the fill.
+	Immediate bool
 }
 
 // DefaultHMARetest is the configuration agreed on 2026-11-12, with crosses
@@ -64,6 +68,7 @@ type Trade struct {
 	Exit       market.Paise
 	LastStop   market.Paise
 	Reason     string // "stop", "trailed stop" or "15:15"
+	DayLowStop bool   // Immediate only: no swing low below the fill, so the stop is the day's low
 }
 
 // HMARetest replays the day. Each leg arms when its fast Hull MA closes above
@@ -127,7 +132,23 @@ func entry(l Leg, cfg Config) (*Trade, error) {
 		if !b.Time.Before(lastEntry) {
 			break
 		}
-		if armed && !math.IsNaN(es[i-1]) && !b.Time.Before(firstEntry) {
+		if cfg.Immediate && armed {
+			armed = false
+			if !b.Time.Before(firstEntry) && b.Open > 0 {
+				price := b.Open
+				stop, ok := lastLowBelow(lows, t0, b.Time, price)
+				dayLow := !ok
+				if dayLow {
+					stop, ok = dayLowBelow(bars[t0:i], price)
+				}
+				lots := int64(cfg.Capital) / (int64(price) * l.Instrument.LotSize)
+				if ok && lots > 0 {
+					return &Trade{Instrument: l.Instrument, Armed: armedAt, EntryTime: b.Time, Entry: price,
+						Lots: lots, Qty: lots * l.Instrument.LotSize, Stop: stop, LastStop: stop, Open: true, DayLowStop: dayLow}, nil
+				}
+			}
+		}
+		if !cfg.Immediate && armed && !math.IsNaN(es[i-1]) && !b.Time.Before(firstEntry) {
 			limit := floorTick(market.Rupees(es[i-1]), cfg.Tick)
 			if b.Low <= limit {
 				price := min(limit, b.Open)
@@ -168,6 +189,18 @@ func lastLowBelow(lows []swing.PivotLow, t0 int, at time.Time, price market.Pais
 		}
 	}
 	return 0, false
+}
+
+// dayLowBelow is the lowest low of bars, if below price.
+func dayLowBelow(bars []market.Bar, price market.Paise) (market.Paise, bool) {
+	if len(bars) == 0 {
+		return 0, false
+	}
+	lo := bars[0].Low
+	for _, b := range bars[1:] {
+		lo = min(lo, b.Low)
+	}
+	return lo, lo < price
 }
 
 func exit(l Leg, cfg Config, t *Trade) {

@@ -19,7 +19,8 @@ import (
 	"serene/internal/slack"
 )
 
-// FutOrder is what a button asks for: one lot of Symbol, a Kite MCX future.
+// FutOrder is what a button asks for: Symbol on Kite, a future (one lot) or
+// a NIFTY option (one lot to buy, all held to sell); Strategy tells which.
 type FutOrder struct {
 	Strategy string
 	Side     market.Side
@@ -59,20 +60,34 @@ func ParseFutOrder(v string) (FutOrder, error) {
 // FutButtons is the row of buttons under a signal: buy each contract, then
 // sell each. labels name each contract on its button, e.g. its expiry.
 func FutButtons(strategy string, syms, labels []string) slack.Block {
-	var bs []slack.Button
+	var bs []OrderButton
 	for _, side := range []market.Side{market.Buy, market.Sell} {
 		style := "primary"
 		if side == market.Sell {
 			style = "danger"
 		}
 		for i, sym := range syms {
-			o := FutOrder{Strategy: strategy, Side: side, Symbol: sym}
-			bs = append(bs, slack.Button{ActionID: fmt.Sprintf("fut_%d", len(bs)), Text: fmt.Sprintf("%s %s (%s)", sideWord(side), sym, labels[i]),
-				Value: o.Value(), Style: style,
+			bs = append(bs, OrderButton{Order: FutOrder{Strategy: strategy, Side: side, Symbol: sym},
+				Text: fmt.Sprintf("%s %s (%s)", sideWord(side), sym, labels[i]), Style: style,
 				Confirm: fmt.Sprintf("*%s 1 lot %s* on Zerodha at market (NRML), for %s.", sideWord(side), sym, strategy)})
 		}
 	}
-	return slack.ActionsBlock(bs...)
+	return OrderButtons(bs...)
+}
+
+// OrderButton is one button of an order row; Confirm says what it places.
+type OrderButton struct {
+	Order                FutOrder
+	Text, Style, Confirm string
+}
+
+// OrderButtons is a row of order buttons, each with Slack's confirm dialog.
+func OrderButtons(bs ...OrderButton) slack.Block {
+	out := make([]slack.Button, len(bs))
+	for i, b := range bs {
+		out[i] = slack.Button{ActionID: fmt.Sprintf("fut_%d", i), Text: b.Text, Value: b.Order.Value(), Style: b.Style, Confirm: b.Confirm}
+	}
+	return slack.ActionsBlock(out...)
 }
 
 // SlackActions takes Slack's button clicks.

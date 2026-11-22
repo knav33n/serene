@@ -23,6 +23,8 @@ import (
 type hmaVariant struct {
 	name              string
 	firstEntry, first time.Duration // paper.Config FirstEntry, FirstArm
+	fast, slow        int           // zero: the default's
+	immediate         bool
 }
 
 // runHMARetestBacktest replays paper.HMARetest, the rules the live system
@@ -42,6 +44,11 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 	slipBps := fs.Float64("slip-bps", 30, "slippage per side, at least 2 ticks")
 	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
 	out := fs.String("trades", "reports/hmaretest_backtest.csv", "every trade of every variant")
+	tf := fs.Int("tf", 1, "bar size in minutes; 1-minute bars are resampled to it")
+	warmDays := fs.Int("warm", 1, "prior trading days of bars to warm the averages")
+	immediate := fs.Bool("immediate", false, "buy at the open of the bar after the cross, not at the slow-HMA retest")
+	grid := fs.Bool("grid", false, "run a fast x slow HMA grid, crosses from 09:30, instead of the three timing variants")
+	split := fs.String("split", "2026-05-01", "first day of the second half, for the H1/H2 columns")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -81,10 +88,28 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	half, err := market.ParseDate(*split)
+	if err != nil {
+		return err
+	}
 	variants := []hmaVariant{
 		{name: "original"},
 		{name: "fill_from_0930", firstEntry: 15 * time.Minute},
 		{name: "cross_from_0930", firstEntry: 15 * time.Minute, first: 15 * time.Minute}, // live from 2026-11-17
+	}
+	if *grid {
+		variants = nil
+		for _, fa := range []int{5, 8, 9, 13, 21} {
+			for _, sl := range []int{13, 21, 34, 50} {
+				if sl > fa {
+					variants = append(variants, hmaVariant{name: fmt.Sprintf("hma_%d_%d", fa, sl),
+						firstEntry: 15 * time.Minute, first: 15 * time.Minute, fast: fa, slow: sl})
+				}
+			}
+		}
+	}
+	for i := range variants {
+		variants[i].immediate = *immediate
 	}
 	slip := func(p market.Paise, buy bool) market.Paise {
 		s := max(market.Paise(math.Round(float64(p)**slipBps/1e4)), 10)
@@ -125,16 +150,18 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 		months         map[string]float64
 		reasons        map[string]int
 		early, earlyPL float64 // trades filled before 09:30 and their P&L
+		h1, h2         float64
+		dayLow         int
+		nets           []float64
 	}
 	stats := make([]stat, len(variants))
 	for i := range stats {
 		stats[i].months, stats[i].reasons = map[string]float64{}, map[string]int{}
 	}
 	indexKey := market.Index(market.NSE, *underlying).Key()
-	var prev map[string][]market.Bar
-	var prevDay market.Date
+	var warmBuf []map[string][]market.Bar // the last --warm stored days, oldest first
 	traded, skipped := 0, 0
-	for di, d := range days {
+	for _, d := range days {
 		all, err := store.DayBars(ctx, *underlying, d)
 		if err != nil {
 			return err
@@ -143,14 +170,13 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 		for _, b := range all {
 			byKey[b.Key] = append(byKey[b.Key], b)
 		}
-		warm, warmDay := prev, prevDay
-		prev, prevDay = byKey, d
+		warm := warmBuf
+		warmBuf = append(warmBuf, byKey)
+		if len(warmBuf) > *warmDays {
+			warmBuf = warmBuf[len(warmBuf)-*warmDays:]
+		}
 		if d.Before(f) {
 			continue
-		}
-		// The warm-up day must be the trading day before.
-		if di == 0 || days[di-1] != warmDay {
-			warm = nil
 		}
 		idx := byKey[indexKey]
 		if len(idx) == 0 || !idx[0].Time.Equal(d.At(9, 15)) {
@@ -170,7 +196,17 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 			if !ok || len(byKey[k]) == 0 {
 				continue
 			}
-			legs = append(legs, paper.Leg{Instrument: inst, Bars: append(append([]market.Bar{}, warm[k]...), byKey[k]...)})
+			var bars []market.Bar
+			for _, w := range warm {
+				bars = append(bars, w[k]...)
+			}
+			bars = append(bars, byKey[k]...)
+			if *tf > 1 {
+				if bars, err = market.Resample(bars, market.NSESession, market.Timeframe(*tf)); err != nil {
+					return err
+				}
+			}
+			legs = append(legs, paper.Leg{Instrument: inst, Bars: bars})
 		}
 		if len(legs) < 2 {
 			skipped++
@@ -180,6 +216,10 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 		for vi, v := range variants {
 			cfg := paper.DefaultHMARetest(d)
 			cfg.FirstEntry, cfg.FirstArm = v.firstEntry, v.first
+			cfg.Immediate = v.immediate
+			if v.fast > 0 {
+				cfg.Fast, cfg.Slow = v.fast, v.slow
+			}
 			tr, err := paper.HMARetest(legs, cfg)
 			if err != nil {
 				return err
@@ -218,6 +258,15 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 			s.dd = max(s.dd, s.peak-s.cum)
 			s.months[d.String()[:7]] += n1
 			s.reasons[tr.Reason]++
+			s.nets = append(s.nets, n1)
+			if d.Before(half) {
+				s.h1 += n1
+			} else {
+				s.h2 += n1
+			}
+			if tr.DayLowStop {
+				s.dayLow++
+			}
 			if tr.EntryTime.Before(d.At(9, 30)) {
 				s.early++
 				s.earlyPL += n1
@@ -232,8 +281,30 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("%s %s..%s: %d days replayed, %d skipped (no 09:15 bar or no CE/PE data)\n", *underlying, f, t, traded, skipped)
+	fmt.Printf("%s %s..%s: %d days replayed, %d skipped (no 09:15 bar or no CE/PE data); %dm bars, immediate %v\n",
+		*underlying, f, t, traded, skipped, *tf, *immediate)
+	if *grid {
+		fmt.Printf("\n%-10s %6s %5s %10s %10s %5s %9s %9s %9s %10s %6s\n", "pair", "trades", "win%", "net", "at slip", "PF", "max DD", "H1", "H2", "ex best 5", "daylow")
+		for vi, v := range variants {
+			s := stats[vi]
+			pf := math.Inf(1)
+			if s.loss > 0 {
+				pf = s.gross / s.loss
+			}
+			ns := append([]float64{}, s.nets...)
+			sort.Float64s(ns)
+			ex := s.net
+			for i := len(ns) - 1; i >= 0 && i >= len(ns)-5; i-- {
+				ex -= ns[i]
+			}
+			fmt.Printf("%-10s %6d %5.0f %10.0f %10.0f %5.2f %9.0f %9.0f %9.0f %10.0f %6d\n", v.name, s.n,
+				100*float64(s.wins)/float64(max(s.n, 1)), s.net, s.slip, pf, s.dd, s.h1, s.h2, ex, s.dayLow)
+		}
+	}
 	for vi, v := range variants {
+		if *grid {
+			break
+		}
 		s := stats[vi]
 		pf := math.Inf(1)
 		if s.loss > 0 {
@@ -259,7 +330,7 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 	}
 	err = analytics.AppendTrials(analytics.LedgerPath(*dir), []analytics.TrialRecord{{
 		Time: time.Now(), Command: "research hmaretest", Strategy: paper.HMARetestName, Underlying: *underlying,
-		Params: strategy.Params{"slip_bps": *slipBps, "step": *step}, From: f, To: t, Count: len(variants),
+		Params: strategy.Params{"slip_bps": *slipBps, "step": *step, "tf": float64(*tf), "immediate": b2f(*immediate)}, From: f, To: t, Count: len(variants),
 		Unsealed: *unseal, Net: total, Trades: n,
 	}})
 	if err != nil {
@@ -267,4 +338,11 @@ func runHMARetestBacktest(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("\ntrades: %s (recorded in the trial ledger)\n", *out)
 	return nil
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }
