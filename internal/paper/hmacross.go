@@ -2,6 +2,7 @@ package paper
 
 import (
 	"math"
+	"sort"
 	"time"
 
 	"serene/internal/indicator"
@@ -34,8 +35,7 @@ type Cross struct {
 	Fast, Slow float64
 }
 
-// HMACrosses lists every cross on today's bars of each leg, oldest first
-// within a leg. Bars before today only warm the averages; a bar whose
+// HMACrosses lists every cross on today's bars of each leg, oldest first. Bars before today only warm the averages; a bar whose
 // average, or the one before it, isn't defined yet can't cross.
 func HMACrosses(legs []Leg, cfg CrossConfig) []Cross {
 	var out []Cross
@@ -54,5 +54,6 @@ func HMACrosses(legs []Leg, cfg CrossConfig) []Cross {
 			out = append(out, Cross{Instrument: l.Instrument, Time: b.Time, End: b.End, Up: now, Close: b.Close, Fast: ef[i], Slow: es[i]})
 		}
 	}
+	sort.SliceStable(out, func(a, b int) bool { return out[a].Time.Before(out[b].Time) })
 	return out
 }
