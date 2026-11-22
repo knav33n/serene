@@ -1,0 +1,16 @@
+[Unit]
+Description=serene jade_lizard, the daily decision at 15:20 IST and a 15:30 follow-up
+
+[Timer]
+# F&O trades until 15:40 since 2026-08-03. 15:20 takes the day's decision (entry on
+# the first day within 45 days of a monthly expiry; exit at 50% of the credit or
+# 21 days to expiry) and follows the orders until they fill. 15:30 finishes
+# anything left, or takes the decision if the 15:20 run failed; a day's entry or
+# exit is never taken twice. Holidays are caught by the command.
+OnCalendar=Mon..Fri *-*-* 15:20:30 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 15:30:30 Asia/Kolkata
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

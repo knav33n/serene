@@ -111,6 +111,7 @@ const usage = `serene researches and trades Indian index options.
 Not built yet:
   serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
   serene forward buttons-test [--strategy goldm_hma_1h] [--channel ID]   (post test futures buttons; click them against serene manual --slack --slack-dry-run)
+  serene live jade            [--slack] [--check] [--decide-at 15:20] [--buffer 0.02]   (NIFTY Jade Lizard, ~200 credit, 1 lot on Zerodha NRML; 50% take profit, exit at 21 days; data/live/STOP stops entries)
   serene live mcx             [--slack] [--check] [--strategies goldm_hma_1h,silverm_hma_1h] [--roll-days 7]   (one lot each on Zerodha, NRML; from the next HMA turn; data/live/STOP stops entries)
   serene prod paper, serene prod live
 `
@@ -275,6 +276,8 @@ func run(ctx context.Context, args []string) error {
 		return runForwardSignals(ctx, rest)
 	case "paper hmacross":
 		return runHMACross(ctx, rest)
+	case "live jade":
+		return runLiveJade(ctx, rest)
 	case "live mcx":
 		return runLiveMCX(ctx, rest)
 	case "paper pdlswing":
