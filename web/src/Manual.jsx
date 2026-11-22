@@ -14,7 +14,7 @@ const Tag = ({ broker }) => <span className={"btag " + broker}>{BROKERS[broker]}
 
 export default function Manual({ man, asking, load }) {
   const say = useSay();
-  const [form, setForm] = useState({ expiry: "", strike: "", side: "CE", limit: "", target: "2", capital: "500000" });
+  const [form, setForm] = useState({ expiry: "", strike: "", side: "CE", limit: "", target: "2", capital: "700000" });
   const [brokers, setBrokers] = useState({ zerodha: true, upstox: true, fyers: false, icici: false });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const picked = Object.keys(BROKERS).filter(b => brokers[b]);
@@ -32,7 +32,9 @@ export default function Manual({ man, asking, load }) {
     const what = `NIFTY ${expiry} ${strike} ${form.side} ${limit === null ? "at market" : `with a limit at ${px(limit)}`}, `
       + `target ${target_pct}% net (a LIMIT sell), capital ${rupees(capital)}`;
     const on = picked.map(b => BROKERS[b]).join(" and ");
-    if (!confirm(`REAL order on ${on}: buy ${what}?`)) return;
+    const itm = form.side === "CE" ? strike - 100 : strike + 100; // ITMDepth in internal/manual
+    const split = `\n\nAn account with over ${rupees(500000)} free splits it: half to ${strike} ${form.side} (ATM), half to ${itm} ${form.side} (ITM).`;
+    if (!confirm(`REAL order on ${on}: buy ${what}?${split}`)) return;
     const r = await api("api/manual/buy", { expiry, strike, option_type: form.side, limit, target_pct, capital, brokers: picked });
     say([...r.trades.map(t => `bought ${t.qty} ${t.contract} on ${BROKERS[t.broker]} @ ${px(t.entry)} · target ${px(t.target)}`),
          ...(r.warnings || []), ...(r.errors || []).map(e => "not bought on " + e)],

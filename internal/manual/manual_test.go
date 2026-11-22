@@ -438,3 +438,125 @@ func TestRunRefusesNonLoopback(t *testing.T) {
 }
 
 func TestMain(m *testing.M) { os.Exit(m.Run()) }
+
+// splitDesk lists 25400 CE/PE (ATM) and 25300 CE / 25500 PE (ITM): ATM at 150, ITM at 220.
+func splitDesk(t *testing.T, bs ...*fake) *Desk {
+	d := desk(t, bs...)
+	ce, pe, itmCE, itmPE := nifty, nifty, nifty, nifty
+	pe.Right, itmPE.Right = "PE", "PE"
+	itmCE.Strike, itmPE.Strike = 25300, 25500
+	d.Contracts = func(context.Context) ([]Contract, error) { return []Contract{ce, pe, itmCE, itmPE}, nil }
+	d.LTP = func(_ context.Context, c Contract) (float64, error) {
+		if c.Strike == 25400 {
+			return 150, nil
+		}
+		return 220, nil
+	}
+	return d
+}
+
+func buys(f *fake) map[string]int64 {
+	out := map[string]int64{}
+	for _, o := range f.placed {
+		if o.Side == "BUY" {
+			out[o.Symbol] += o.Qty
+		}
+	}
+	return out
+}
+
+func TestSplitAboveFiveLakhHalfATMHalfITM(t *testing.T) {
+	for _, right := range []string{"CE", "PE"} {
+		z := &fake{name: "zerodha", funds: 800000}
+		z.fillAt = func(o OrderReq) OrderState { // market buys fill at the LTP
+			if o.Side == "BUY" && strings.Contains(o.Symbol, "25400") {
+				return OrderState{Done: true, Filled: o.Qty, Average: 150}
+			} else if o.Side == "BUY" {
+				return OrderState{Done: true, Filled: o.Qty, Average: 220}
+			}
+			return OrderState{Filled: 0, Average: 0} // targets rest
+		}
+		d := splitDesk(t, z)
+		r, err := d.Buy(context.Background(), BuyReq{Expiry: expiry.String(), Strike: 25400, Right: right,
+			Target: 2, Capital: 600000, Brokers: []string{"zerodha"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		itm := "25300"
+		if right == "PE" {
+			itm = "25500"
+		}
+		atmSym, itmSym := fmt.Sprintf("NIFTY%s25400%s", expiry, right), fmt.Sprintf("NIFTY%s%s%s", expiry, itm, right)
+		// ₹3L each: 30 lots at 150 (₹2.93L), 20 lots at 220 (₹2.86L)
+		got := buys(z)
+		if len(got) != 2 || got[atmSym] != 30*65 || got[itmSym] != 20*65 {
+			t.Errorf("%s: buys %v, want %s 1950 and %s 1300", right, got, atmSym, itmSym)
+		}
+		if len(r.Trades) != 2 || r.Trades[1].Contract != "NIFTY "+expiry.String()+" "+itm+" "+right || r.Trades[1].Target <= 220 {
+			t.Errorf("%s: trades %+v", right, r.Trades)
+		}
+		if len(r.Warnings) != 0 {
+			t.Errorf("%s: warnings %v", right, r.Warnings)
+		}
+		sells := 0
+		for _, o := range z.placed {
+			if o.Side == "SELL" {
+				sells++
+			}
+		}
+		if sells != 3 { // 1950 goes out as 1755 + 195 (the freeze), 1300 as one
+			t.Errorf("%s: %d target sells, want 3", right, sells)
+		}
+	}
+}
+
+func TestFiveLakhOrLessBuysATMOnly(t *testing.T) {
+	z := &fake{name: "zerodha", funds: 500000}
+	d := splitDesk(t, z)
+	r, err := d.Buy(context.Background(), BuyReq{Expiry: expiry.String(), Strike: 25400, Right: "CE",
+		Target: 2, Capital: 700000, Brokers: []string{"zerodha"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := buys(z); len(got) != 1 || got[fmt.Sprintf("NIFTY%s25400CE", expiry)] != 51*65 {
+		t.Errorf("buys %v, want 51 lots of 25400 CE", got)
+	}
+	if len(r.Trades) != 1 {
+		t.Errorf("trades %+v", r.Trades)
+	}
+}
+
+func TestSplitWithoutTheITMStrikeBuysATMAndWarns(t *testing.T) {
+	z := &fake{name: "zerodha", funds: 800000}
+	d := desk(t, z) // lists 25400 CE only
+	r, err := d.Buy(context.Background(), BuyReq{Expiry: expiry.String(), Strike: 25400, Right: "CE",
+		Target: 2, Capital: 600000, Brokers: []string{"zerodha"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := buys(z); len(got) != 1 || got[fmt.Sprintf("NIFTY%s25400CE", expiry)] != 61*65 {
+		t.Errorf("buys %v, want all of ₹6L in 25400 CE", got)
+	}
+	if len(r.Warnings) != 1 || !strings.Contains(r.Warnings[0], "ATM only: no ITM 25300 CE") {
+		t.Errorf("warnings %v", r.Warnings)
+	}
+}
+
+func TestSplitCarriesTheLimitOffsetToITM(t *testing.T) {
+	z := &fake{name: "zerodha", funds: 1e6}
+	d := splitDesk(t, z)
+	limit := 148.0 // 2 under the ATM's 150, so the ITM's goes at 218
+	if _, err := d.Buy(context.Background(), BuyReq{Expiry: expiry.String(), Strike: 25400, Right: "PE", Limit: &limit,
+		Target: 2, Capital: 600000, Brokers: []string{"zerodha"}}); err != nil {
+		t.Fatal(err)
+	}
+	prices := map[string]string{}
+	for _, o := range z.placed {
+		if o.Side == "BUY" {
+			prices[o.Symbol] = fmt.Sprintf("%s %.2f", o.Type, o.Price)
+		}
+	}
+	if prices[fmt.Sprintf("NIFTY%s25400PE", expiry)] != "LIMIT 148.00" || prices[fmt.Sprintf("NIFTY%s25500PE", expiry)] != "LIMIT 218.00" {
+		t.Errorf("buy prices %v", prices)
+	}
+}

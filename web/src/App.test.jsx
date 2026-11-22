@@ -62,8 +62,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Buy" }));
     await screen.findByText(/bought 65 NIFTY 2026-11-24 25400 CE on Zerodha @ 100.00/);
     const buy = calls.find(c => c.path === "api/manual/buy").body;
-    expect(buy).toEqual({ expiry: "2026-11-24", strike: 25400, option_type: "CE", limit: 100, target_pct: 2, capital: 500000, brokers: ["zerodha"] });
+    expect(buy).toEqual({ expiry: "2026-11-24", strike: 25400, option_type: "CE", limit: 100, target_pct: 2, capital: 700000, brokers: ["zerodha"] });
     expect(confirm.mock.calls[0][0]).toMatch(/^REAL order on Zerodha: buy NIFTY 2026-11-24 25400 CE with a limit at 100.00/);
+    expect(confirm.mock.calls[0][0]).toMatch(/half to 25400 CE \(ATM\), half to 25300 CE \(ITM\)/);
   });
 
   it("sends nothing when the confirm is declined", async () => {

@@ -5,7 +5,11 @@
 //
 // A buy is a LIMIT order at the price typed (at market with none), sized to
 // the capital or the account's free margin when that's less, split at the
-// freeze quantity (at most MaxOrders orders). What hasn't filled in LimitWait
+// freeze quantity (at most MaxOrders orders). On an account with more than
+// SplitAbove free, half the spend buys the strike typed (taken as ATM) and half
+// the strike ITMDepth in the money (CE lower, PE higher), each leg with its own
+// orders and target; with that ITM strike missing or unpriced it's ATM only.
+// What hasn't filled in LimitWait
 // is cancelled. The target is a resting LIMIT sell at the price that nets the
 // target percentage after the broker's charges both ways. There's no stop:
 // what's still held at 15:20 is squared off by the desk (SquareOff), and the
@@ -35,6 +39,12 @@ const Tag = "serenemanual"
 
 // MaxOrders is the most orders one buy goes out as: Kite takes 10 a second.
 const MaxOrders = 10
+
+// SplitAbove is the free margin above which a buy is split half ATM, half ITM.
+const SplitAbove = 500000
+
+// ITMDepth is how far in the money the split's second leg is, in points.
+const ITMDepth = 100
 
 // Hours manual buys are taken, IST: what's left at the close hour is squared off.
 var (
@@ -362,10 +372,16 @@ func (d *Desk) Buy(ctx context.Context, r BuyReq) (BuyResult, error) {
 		}
 	}
 
+	atm := leg{c: c, price: price}
+	if r.Limit != nil {
+		atm.typ, atm.limit = "LIMIT", *r.Limit
+	}
+	itm, itmWhy := d.itmLeg(ctx, r, atm)
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	type res struct {
-		b    Bought
+		b    []Bought
 		warn string
 		err  error
 	}
@@ -375,18 +391,17 @@ func (d *Desk) Buy(ctx context.Context, r BuyReq) (BuyResult, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			b, warn, err := d.buyOn(ctx, name, c, r, price)
+			b, warn, err := d.buyOn(ctx, name, r, atm, itm, itmWhy)
 			out[i] = res{b, warn, err}
 		}()
 	}
 	wg.Wait()
 	var result BuyResult
 	for i, o := range out {
+		result.Trades = append(result.Trades, o.b...)
 		if o.err != nil {
 			result.Errors = append(result.Errors, Names[names[i]]+": "+o.err.Error())
-			continue
 		}
-		result.Trades = append(result.Trades, o.b)
 		if o.warn != "" {
 			result.Warnings = append(result.Warnings, Names[names[i]]+": "+o.warn)
 		}
@@ -395,6 +410,55 @@ func (d *Desk) Buy(ctx context.Context, r BuyReq) (BuyResult, error) {
 		return BuyResult{}, errors.New(strings.Join(result.Errors, "; "))
 	}
 	return result, nil
+}
+
+// leg is one contract a buy goes into, at the price it's sized at.
+type leg struct {
+	c     Contract
+	typ   string  // MARKET or LIMIT
+	limit float64 // LIMIT's price
+	price float64 // what it's sized at: the limit, else the LTP
+}
+
+// ITMStrike is the split's in-the-money strike for c, taken as ATM.
+func ITMStrike(c Contract) float64 {
+	if c.Right == "PE" {
+		return c.Strike + ITMDepth
+	}
+	return c.Strike - ITMDepth
+}
+
+// itmLeg is the split's ITM leg for the ATM one, or why there's none. It goes
+// at market when the ATM leg does; with a limit typed, its limit sits as far
+// from its LTP as the typed one does from the ATM's, rounded to the tick.
+func (d *Desk) itmLeg(ctx context.Context, r BuyReq, atm leg) (*leg, string) {
+	strike := ITMStrike(atm.c)
+	c, err := d.contract(ctx, r.Expiry, strike, r.Right)
+	if err != nil {
+		return nil, fmt.Sprintf("no ITM %g %s (%v)", strike, r.Right, err)
+	}
+	ltp, err := d.LTP(ctx, c)
+	if err != nil || ltp <= 0 {
+		return nil, fmt.Sprintf("no LTP for ITM %s (%v)", Label(c), err)
+	}
+	l := leg{c: c, typ: "MARKET", price: ltp}
+	if atm.typ == "LIMIT" {
+		atmLTP, err := d.LTP(ctx, atm.c)
+		if err != nil || atmLTP <= 0 {
+			return nil, fmt.Sprintf("no LTP for %s to set the ITM limit (%v)", Label(atm.c), err)
+		}
+		tick := c.Tick
+		if tick <= 0 {
+			tick = 0.05
+		}
+		px := math.Round((ltp+atm.limit-atmLTP)/tick) * tick
+		px = math.Round(px*100) / 100
+		if px <= 0 {
+			return nil, fmt.Sprintf("the ITM limit for %s comes out at %.2f", Label(c), px)
+		}
+		l.typ, l.limit, l.price = "LIMIT", px, px
+	}
+	return &l, ""
 }
 
 func contains(xs []string, x string) bool {
@@ -406,31 +470,79 @@ func contains(xs []string, x string) bool {
 	return false
 }
 
-func (d *Desk) buyOn(ctx context.Context, name string, c Contract, r BuyReq, price float64) (Bought, string, error) {
+// buyOn buys on one broker: min(capital, free) into the ATM leg, or split
+// half and half with the ITM leg when more than SplitAbove is free.
+func (d *Desk) buyOn(ctx context.Context, name string, r BuyReq, atm leg, itm *leg, itmWhy string) ([]Bought, string, error) {
 	b, err := d.Broker(ctx, name)
 	if err != nil {
-		return Bought{}, "", err
+		return nil, "", err
 	}
+	funds, err := b.Funds(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("free margin: %w", err)
+	}
+	spend := min(r.Capital, funds)
+	legs, spends := []leg{atm}, []float64{spend}
+	var warns []string
+	if funds > SplitAbove {
+		switch {
+		case itm == nil:
+			warns = append(warns, "ATM only: "+itmWhy)
+		default:
+			if n, err := d.Lots(itm.c, spend/2, itm.price, d.now()); err != nil || n < 1 {
+				warns = append(warns, fmt.Sprintf("ATM only: ₹%s doesn't buy a lot of ITM %s at %.2f", inr(spend/2), Label(itm.c), itm.price))
+			} else {
+				legs, spends = []leg{atm, *itm}, []float64{spend / 2, spend / 2}
+			}
+		}
+	}
+	var out []Bought
+	var errs []string
+	for i, l := range legs {
+		bought, warn, err := d.buyLeg(ctx, b, l, spends[i], r.Capital/float64(len(legs)), funds, r)
+		if err != nil {
+			if len(legs) > 1 {
+				err = fmt.Errorf("%s: %w", Label(l.c), err)
+			}
+			errs = append(errs, err.Error())
+			continue
+		}
+		out = append(out, bought)
+		if warn != "" {
+			if len(legs) > 1 {
+				warn = Label(l.c) + ": " + warn
+			}
+			warns = append(warns, warn)
+		}
+	}
+	if len(out) == 0 {
+		return nil, "", errors.New(strings.Join(errs, "; "))
+	}
+	if len(errs) > 0 { // one leg of two bought: say why the other didn't
+		warns = append(warns, errs...)
+	}
+	return out, strings.Join(warns, "; "), nil
+}
+
+// buyLeg buys l with spend on b and places its target; share is the leg's
+// part of the capital, to say when spend buys less than it would.
+func (d *Desk) buyLeg(ctx context.Context, b Broker, l leg, spend, share, funds float64, r BuyReq) (Bought, string, error) {
+	c, price, typ, limit := l.c, l.price, l.typ, l.limit
+	if typ == "" {
+		typ = "MARKET"
+	}
+	name := b.Name()
 	sym, err := b.Symbol(c)
 	if err != nil {
 		return Bought{}, "", err
 	}
-	funds, err := b.Funds(ctx)
-	if err != nil {
-		return Bought{}, "", fmt.Errorf("free margin: %w", err)
-	}
 	now := d.now()
-	spend := min(r.Capital, funds)
 	lots, err := d.Lots(c, spend, price, now)
 	if err != nil {
 		return Bought{}, "", err
 	}
 	if lots < 1 {
 		return Bought{}, "", fmt.Errorf("₹%s doesn't buy a lot of %d at %.2f (₹%s free)", inr(spend), c.LotSize, price, inr(funds))
-	}
-	typ, limit := "MARKET", 0.0
-	if r.Limit != nil {
-		typ, limit = "LIMIT", *r.Limit
 	}
 	sizes := OrderSizes(lots*c.LotSize, c.LotSize, c.FreezeQty)
 	var ids []string
@@ -466,8 +578,8 @@ func (d *Desk) buyOn(ctx context.Context, name string, c Contract, r BuyReq, pri
 	if waitErr != nil {
 		warns = append(warns, waitErr.Error())
 	}
-	if covers, _ := d.Lots(c, r.Capital, price, now); filled/c.LotSize < covers {
-		warns = append(warns, fmt.Sprintf("%d of the %d lots ₹%s covers", filled/c.LotSize, covers, inr(r.Capital)))
+	if covers, _ := d.Lots(c, share, price, now); filled/c.LotSize < covers {
+		warns = append(warns, fmt.Sprintf("%d of the %d lots ₹%s covers", filled/c.LotSize, covers, inr(share)))
 	}
 	target, err := d.Target(c, avg, filled, r.Target, now)
 	if err == nil {
@@ -482,8 +594,8 @@ func (d *Desk) buyOn(ctx context.Context, name string, c Contract, r BuyReq, pri
 		warns = append(warns, "the target wasn't placed: "+err.Error()+" (Exit squares it off)")
 	}
 	bought := Bought{Broker: name, Contract: Label(c), Qty: filled, Entry: round2(avg), Target: target}
-	d.say(ctx, "manual: bought %d %s on %s @ %.2f · target %.2f (%g%% net) · capital ₹%s%s", filled, Label(c), Names[name],
-		avg, target, r.Target, inr(r.Capital), warnText(warns))
+	d.say(ctx, "manual: bought %d %s on %s @ %.2f · target %.2f (%g%% net) · spend ₹%s of capital ₹%s%s", filled, Label(c), Names[name],
+		avg, target, r.Target, inr(spend), inr(r.Capital), warnText(warns))
 	return bought, strings.Join(warns, "; "), nil
 }
 
