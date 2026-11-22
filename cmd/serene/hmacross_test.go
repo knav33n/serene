@@ -19,8 +19,10 @@ type fakeOptKite struct {
 	placed []kite.OrderRequest
 }
 
-func (f *fakeOptKite) Instruments(context.Context, string) ([]kite.Instrument, error) { return f.ins, nil }
-func (f *fakeOptKite) Positions(context.Context) ([]kite.Position, error)            { return f.pos, nil }
+func (f *fakeOptKite) Instruments(context.Context, string) ([]kite.Instrument, error) {
+	return f.ins, nil
+}
+func (f *fakeOptKite) Positions(context.Context) ([]kite.Position, error) { return f.pos, nil }
 func (f *fakeOptKite) PlaceOrder(_ context.Context, o kite.OrderRequest) (string, error) {
 	f.placed = append(f.placed, o)
 	return "1", nil

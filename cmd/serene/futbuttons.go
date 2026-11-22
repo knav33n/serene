@@ -73,8 +73,6 @@ func futButtons(cl *clients, logf func(string, ...any), dryRun bool) (*manual.Sl
 			switch o.Strategy {
 			case paper.HMACrossName:
 				return placeOpt(ctx, kc, o, time.Now(), dryRun)
-			case hmaCrossTest: // test buttons never place an order
-				return placeOpt(ctx, kc, o, time.Now(), true)
 			}
 			return placeFut(ctx, kc, o, time.Now(), dryRun)
 		}}, nil

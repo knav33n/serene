@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"serene/internal/auth"
 	"serene/internal/kite"
 	"serene/internal/manual"
 	"serene/internal/market"
@@ -20,10 +18,6 @@ import (
 // hmaCrossMaxAge: an older cross (a backfill after downtime) is posted
 // without order buttons.
 const hmaCrossMaxAge = 15 * time.Minute
-
-// hmaCrossTest is the strategy on test buttons: Hearth answers their clicks
-// as a dry run, whatever its own setting.
-const hmaCrossTest = paper.HMACrossName + "_test"
 
 // runHMACross posts nifty_hma_crossover's signals: each run fetches the day's
 // ATM NIFTY CE and PE minute bars from Kite, builds 10-minute bars, and posts
@@ -38,7 +32,6 @@ func runHMACross(ctx context.Context, args []string) error {
 	alertPath := fs.String("alert", "data/hmacross_alert.json", "whether a failure has been posted")
 	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
 	warm := fs.Int("warm", 4, "prior trading days of bars to warm the averages")
-	testChannel := fs.String("test", "", "post a TEST up-cross and down-cross, with dry-run buttons, to this channel ID, and stop")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -50,29 +43,17 @@ func runHMACross(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	if *testChannel != "" && *date == "" {
-		// The test uses the latest session's contracts.
-		if now.Before(d.At(9, 16)) {
-			d = d.AddDays(-1)
-		}
-		for !market.NSETradingDay(d) {
-			d = d.AddDays(-1)
-		}
-	}
 	if !market.NSETradingDay(d) {
 		fmt.Println(d, "is not an NSE trading day")
 		return nil
 	}
-	if *testChannel == "" && now.Before(d.At(9, 16)) {
+	if now.Before(d.At(9, 16)) {
 		fmt.Println("before the first bar of", d)
 		return nil
 	}
 	var client *slack.Client
 	var channel string
 	var err error
-	if *testChannel != "" {
-		return hmaCrossTestPost(ctx, d, now, *dir, *step, *testChannel)
-	}
 	if *useSlack {
 		if client, channel, err = openSlackChannel(ctx, "SLACK_PAPER_CHANNEL"); err != nil {
 			return err
@@ -318,55 +299,4 @@ func awaitFill(ctx context.Context, kc interface {
 		}
 	}
 	return fmt.Sprintf(":hourglass: %s placed; status %s after 30s, check Kite", what, st.Status), nil
-}
-
-// hmaCrossTestPost posts a made-up up-cross on the CE and down-cross on the
-// PE of day's contracts, each with its button, marked TEST. The buttons carry
-// hmaCrossTest, so a click is checked on Kite but never placed.
-func hmaCrossTestPost(ctx context.Context, d market.Date, now time.Time, dir string, step float64, channel string) error {
-	if err := auth.LoadDotEnv(".env"); err != nil {
-		return err
-	}
-	token := os.Getenv("SLACK_TOKEN")
-	if token == "" {
-		return errors.New("needs SLACK_TOKEN")
-	}
-	kc, err := kiteClient(ctx)
-	if err != nil {
-		return err
-	}
-	st, err := paperDay(ctx, kc, d, d.At(15, 30), dir, step)
-	if err != nil {
-		return err
-	}
-	if st == nil {
-		return fmt.Errorf("no NIFTY 09:15 bar on %s", d)
-	}
-	sc := slack.New(token)
-	ch, err := sc.Resolve(ctx, channel)
-	if err != nil {
-		return err
-	}
-	cfg := paper.DefaultHMACross(d)
-	for _, up := range []bool{true, false} {
-		right := market.Call
-		if !up {
-			right = market.Put
-		}
-		c := paper.Cross{Instrument: market.Option(market.NFO, "NIFTY", st.Expiry, market.Rupees(st.Strike), right, st.Lot),
-			Time: now.Add(-10 * time.Minute), End: now, Up: up, Close: market.Rupees(100), Fast: 101, Slow: 100}
-		if !up {
-			c.Fast = 99
-		}
-		text := ":test_tube: *TEST, not a signal* (buttons are a dry run) · " + hmaCrossText(c, cfg)
-		row := hmaCrossButtons(st, c)
-		for _, b := range row["elements"].([]map[string]any) {
-			b["value"] = strings.Replace(b["value"].(string), paper.HMACrossName+"|", hmaCrossTest+"|", 1)
-		}
-		if _, err := sc.PostBlocks(ctx, ch, text, []slack.Block{slack.SectionBlock(text), row}); err != nil {
-			return err
-		}
-		fmt.Println("posted:", text)
-	}
-	return nil
 }
