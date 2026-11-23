@@ -23,12 +23,12 @@ import (
 // a ~200-point credit, 50% take profit, exit at 21 days, no stop. It runs at
 // 15:20 IST (and again at 15:30 to finish anything left): the daily decision
 // is taken once, then legs are placed one at a time and followed until they
-// fill. State is data/live/jade.json; a STOP file there stops new entries.
+// fill. State is data/live/jade.json.
 func runLiveJade(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("live jade", flag.ContinueOnError)
 	useSlack := fs.Bool("slack", false, "post entries, exits and the daily mark to SLACK_JADE_CHANNEL, halts to SLACK_ALERT_CHANNEL")
 	check := fs.Bool("check", false, "show the state, today's pick (or the next expiry's), margin and positions; place nothing")
-	liveDir := fs.String("live-dir", "data/live", "live state; a STOP file here stops new entries")
+	liveDir := fs.String("live-dir", "data/live", "live state")
 	report := fs.String("report", "reports/live_jade.csv", "closed live trades")
 	costsFile := fs.String("costs", "configs/costs.yaml", "charges schedule")
 	buffer := fs.Float64("buffer", 0.02, "how far through the touch a LIMIT is priced")
@@ -227,7 +227,7 @@ func liveJade(ctx context.Context, client *slack.Client, channel string, check b
 	rules := live.DefaultJade
 	monthlies := live.JadeMonthlies(m.expires)
 	broker := &live.Zerodha{C: kc, Symbols: m.syms, Exchange: "NFO", Product: "NRML"}
-	cfg := live.JadeConfig{Rules: rules, Buffer: buffer, MaxMods: 10, NoEntry: fileExists(filepath.Join(liveDir, "STOP"))}
+	cfg := live.JadeConfig{Rules: rules, Buffer: buffer, MaxMods: 10}
 
 	// The market is open if the front monthly future traded in the last 10 minutes.
 	var front market.Date
@@ -300,7 +300,7 @@ func liveJade(ctx context.Context, client *slack.Client, channel string, check b
 	if check {
 		fmt.Printf("state: phase %q expiry %s legs %d credit %.2f done %v halted %q since %s\n", st.Phase, st.Expiry, len(st.Legs),
 			st.Credit(), st.Done, st.Halted, st.Since.In(market.IST).Format("2006-01-02 15:04"))
-		fmt.Printf("market open %v, lot %d, STOP %v, monthlies %v\n", open, m.lot, cfg.NoEntry, monthlies[:min(4, len(monthlies))])
+		fmt.Printf("market open %v, lot %d, monthlies %v\n", open, m.lot, monthlies[:min(4, len(monthlies))])
 		for _, l := range st.Legs {
 			inst, _ := market.ParseKey(l.Key)
 			pos, perr := broker.Position(ctx, inst)

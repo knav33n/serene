@@ -257,7 +257,6 @@ type JadeConfig struct {
 	Rules   JadeRules
 	Buffer  float64 // how far through the touch a LIMIT is priced, as a fraction
 	MaxMods int
-	NoEntry bool // a STOP file: exits still go
 }
 
 // JadeEvent is something to report.
@@ -296,7 +295,7 @@ func StepJade(ctx context.Context, b Broker, st *JadeState, snap JadeSnap, cfg J
 	today := market.DateOf(snap.Now.In(market.IST))
 	switch st.Phase {
 	case JadeFlat:
-		if !snap.Decide || snap.Entry == nil || cfg.NoEntry || st.DoneFor(snap.Entry.Expiry) {
+		if !snap.Decide || snap.Entry == nil || st.DoneFor(snap.Entry.Expiry) {
 			return nil, nil
 		}
 		e := snap.Entry

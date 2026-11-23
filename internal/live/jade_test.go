@@ -214,16 +214,6 @@ func TestJadeNoMarginSkipsTheExpiry(t *testing.T) {
 	}
 }
 
-func TestJadeStopFileBlocksEntry(t *testing.T) {
-	f := newFake(0)
-	st := &JadeState{}
-	c := jCfg()
-	c.NoEntry = true
-	if _, err := StepJade(context.Background(), f, st, jSnap(jNow, jPick, jQuotes(160, 80, 60)), c); err != nil || st.Phase != JadeFlat || st.DoneFor(jExp) {
-		t.Fatalf("%v %+v", err, st)
-	}
-}
-
 func TestJadeRepricesThenHaltsUnfilled(t *testing.T) {
 	f := newFake(0)
 	st := &JadeState{}
