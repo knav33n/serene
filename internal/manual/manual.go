@@ -10,14 +10,16 @@
 // the strike ITMDepth in the money (CE lower, PE higher), each leg with its own
 // orders and target; with that ITM strike missing or unpriced it's ATM only.
 // What hasn't filled in LimitWait
-// is cancelled. The target is a resting LIMIT sell at the price that nets the
-// target percentage after the broker's charges both ways. There's no stop:
+// is cancelled. The target is the price that nets the target percentage after
+// the broker's charges both ways; nothing rests at the broker for it until the
+// LTP reaches it: the desk watches (Watch) and then places a LIMIT sell at the
+// target. There's no stop:
 // what's still held at 15:20 is squared off by the desk (SquareOff), and the
 // product is intraday (MIS / I), so the broker squares off anything the desk
 // misses.
 //
-// Nothing is kept here: a manual trade is a position whose orders today carry
-// Tag, its target the tagged SELL still open.
+// A manual trade is a position whose orders today carry Tag; its targets are
+// kept in Targets' file so a restart keeps watching them.
 package manual
 
 import (
@@ -148,6 +150,7 @@ type Desk struct {
 	Notify    func(ctx context.Context, text string)
 	Now       func() time.Time
 	LimitWait time.Duration // how long a buy's LIMIT waits before what's left is cancelled
+	Targets   *Targets      // the targets the desk watches (Watch), placing a LIMIT sell at each once reached
 	Poll      time.Duration
 
 	mu sync.Mutex // one order action at a time
@@ -248,8 +251,8 @@ func (d *Desk) Lots(c Contract, spend, price float64, at time.Time) (int64, erro
 
 // Target is the sell price, rounded up to the tick, at which selling qty
 // bought at entry nets pct % of entry × qty after the broker's charges both
-// ways (each of the orders it goes out as). A resting LIMIT fills at its
-// price or better, so no slippage is added.
+// ways (each of the orders it goes out as). It's sold with a LIMIT at that
+// price, so no slippage is added.
 func (d *Desk) Target(c Contract, entry float64, qty int64, pct float64, at time.Time) (float64, error) {
 	tick := c.Tick
 	if tick <= 0 {
@@ -583,15 +586,11 @@ func (d *Desk) buyLeg(ctx context.Context, b Broker, l leg, spend, share, funds 
 	}
 	target, err := d.Target(c, avg, filled, r.Target, now)
 	if err == nil {
-		for _, q := range OrderSizes(filled, c.LotSize, c.FreezeQty) {
-			if _, e := b.Place(ctx, OrderReq{Symbol: sym, Exchange: "NFO", Product: b.Product(), Side: "SELL", Type: "LIMIT", Qty: q, Price: target}); e != nil {
-				err = e
-				break
-			}
-		}
+		err = d.targets().Add(Tracked{Day: market.DateOf(now).String(), Broker: name, Symbol: sym, Exchange: "NFO", Product: b.Product(),
+			Expiry: c.Expiry.String(), Strike: c.Strike, Right: c.Right, Qty: filled, Entry: round2(avg), Price: target})
 	}
 	if err != nil {
-		warns = append(warns, "the target wasn't placed: "+err.Error()+" (Exit squares it off)")
+		warns = append(warns, "the target isn't watched: "+err.Error()+" (Exit squares it off)")
 	}
 	bought := Bought{Broker: name, Contract: Label(c), Qty: filled, Entry: round2(avg), Target: target}
 	d.say(ctx, "manual: bought %d %s on %s @ %.2f · target %.2f (%g%% net) · spend ₹%s of capital ₹%s%s", filled, Label(c), Names[name],
@@ -726,14 +725,29 @@ func (d *Desk) Exit(ctx context.Context, broker, symbol, exchange, product strin
 }
 
 func (d *Desk) exit(ctx context.Context, b Broker, symbol, exchange, product string) (ExitResult, error) {
-	orders, err := b.Orders(ctx)
-	if err != nil {
-		return ExitResult{}, fmt.Errorf("orders: %w", err)
+	r, err := d.sell(ctx, b, symbol, exchange, product, 0, true)
+	if r.Qty > 0 || errors.Is(err, errNoPosition) {
+		d.untrack(b.Name(), symbol)
 	}
-	for _, o := range orders {
-		if o.Open && o.Symbol == symbol && (o.Exchange == "" || o.Exchange == exchange) {
-			if err := b.Cancel(ctx, o.ID); err != nil {
-				return ExitResult{}, fmt.Errorf("cancel order %s: %w", o.ID, err)
+	return r, err
+}
+
+var errNoPosition = errors.New("no position")
+
+// sell closes up to qty (0: all) of the broker's position in symbol (its
+// product) at market, split at the freeze quantity; with cancel, its pending
+// orders on the contract are cancelled first.
+func (d *Desk) sell(ctx context.Context, b Broker, symbol, exchange, product string, qty int64, cancel bool) (ExitResult, error) {
+	if cancel {
+		orders, err := b.Orders(ctx)
+		if err != nil {
+			return ExitResult{}, fmt.Errorf("orders: %w", err)
+		}
+		for _, o := range orders {
+			if o.Open && o.Symbol == symbol && (o.Exchange == "" || o.Exchange == exchange) {
+				if err := b.Cancel(ctx, o.ID); err != nil {
+					return ExitResult{}, fmt.Errorf("cancel order %s: %w", o.ID, err)
+				}
 			}
 		}
 	}
@@ -741,20 +755,23 @@ func (d *Desk) exit(ctx context.Context, b Broker, symbol, exchange, product str
 	if err != nil {
 		return ExitResult{}, fmt.Errorf("positions: %w", err)
 	}
-	var qty int64
+	var held int64
 	name := symbol
 	for _, p := range ps {
 		if p.Symbol == symbol && p.Exchange == exchange && p.Product == product {
-			qty += p.Qty
+			held += p.Qty
 			name = p.Name
 		}
 	}
-	if qty == 0 {
-		return ExitResult{}, fmt.Errorf("no %s (%s) position on %s", name, product, Names[b.Name()])
+	if held == 0 || (qty > 0 && held < 0) {
+		return ExitResult{}, fmt.Errorf("%w: no %s (%s) position on %s", errNoPosition, name, product, Names[b.Name()])
 	}
 	side := "SELL"
-	if qty < 0 {
-		side, qty = "BUY", -qty
+	if held < 0 {
+		side, held = "BUY", -held
+	}
+	if qty <= 0 || qty > held {
+		qty = held
 	}
 	lot, freeze := int64(1), int64(0)
 	if cs, err := d.Contracts(ctx); err == nil {

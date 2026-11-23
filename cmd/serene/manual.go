@@ -181,6 +181,7 @@ func runManual(ctx context.Context, args []string) error {
 	costsPath := fs.String("costs", "configs/costs.yaml", "charges schedule, for sizing and the target")
 	useSlack := fs.Bool("slack", false, "post buys and square-offs to SLACK_CHANNEL")
 	dryRun := fs.Bool("slack-dry-run", false, "Slack's futures buttons check the order on Kite and reply, but place nothing")
+	targetsPath := fs.String("targets", "data/manual/targets.json", "the targets being watched, kept across restarts")
 	wait := fs.Duration("limit-wait", 60*time.Second, "how long a LIMIT buy waits before what's left is cancelled")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -249,6 +250,7 @@ func runManual(ctx context.Context, args []string) error {
 		Costs:     costs,
 		Notify:    notify,
 		LimitWait: *wait,
+		Targets:   &manual.Targets{Path: *targetsPath},
 	}
 	logf := func(format string, a ...any) {
 		fmt.Printf("%s "+format+"\n", append([]any{time.Now().In(market.IST).Format("15:04:05")}, a...)...)

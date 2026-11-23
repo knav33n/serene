@@ -1,5 +1,5 @@
 // Manual Nifty trades (serene manual, internal/manual): a strike bought with a LIMIT order at the price
-// typed (at market with none), its target a resting LIMIT sell, on the brokers ticked; the brokers'
+// typed (at market with none), its target watched by the desk, a LIMIT sell at it placed once the LTP reaches it, on the brokers ticked; the brokers'
 // open F&O positions, each squared off by its Exit; and today's trades as each broker has them,
 // a manual one with its target and Sell now.
 import { useState } from "react";
@@ -30,7 +30,7 @@ export default function Manual({ man, asking, load }) {
     if (!(target_pct > 0) || !(capital > 0)) return say("the target and the capital must be above 0", false);
     if (!picked.length) return say("tick a broker", false);
     const what = `NIFTY ${expiry} ${strike} ${form.side} ${limit === null ? "at market" : `with a limit at ${px(limit)}`}, `
-      + `target ${target_pct}% net (a LIMIT sell), capital ${rupees(capital)}`;
+      + `target ${target_pct}% net (LIMIT sell placed when the LTP reaches it), capital ${rupees(capital)}`;
     const on = picked.map(b => BROKERS[b]).join(" and ");
     const itm = form.side === "CE" ? strike - 100 : strike + 100; // ITMDepth in internal/manual
     const split = `\n\nAn account with over ${rupees(500000)} free splits it: half to ${strike} ${form.side} (ATM), half to ${itm} ${form.side} (ITM).`;

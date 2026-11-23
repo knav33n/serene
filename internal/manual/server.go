@@ -216,6 +216,9 @@ func (s *Server) Run(ctx context.Context) error {
 	go func() { done <- srv.Serve(ln) }()
 	tick := time.NewTicker(20 * time.Second)
 	defer tick.Stop()
+	watch := time.NewTicker(2 * time.Second)
+	defer watch.Stop()
+	var watchErr string
 	var squared market.Date
 	for {
 		select {
@@ -225,6 +228,16 @@ func (s *Server) Run(ctx context.Context) error {
 			return srv.Shutdown(stop)
 		case err := <-done:
 			return err
+		case <-watch.C:
+			if err := s.Desk.Watch(ctx); err != nil {
+				if err.Error() != watchErr { // once, not every 2s
+					s.logf("targets: %v", err)
+					s.Desk.say(ctx, ":rotating_light: manual: targets: %v", err)
+				}
+				watchErr = err.Error()
+			} else {
+				watchErr = ""
+			}
 		case <-tick.C:
 			now := s.Desk.now()
 			d := market.DateOf(now)

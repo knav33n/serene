@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"serene/internal/market"
 )
 
 // Brokers are the accounts the page shows, in its order.
@@ -114,11 +116,16 @@ func (d *Desk) read(ctx context.Context, name string) book {
 		notes = append(notes, "order tags unread: "+err.Error())
 	}
 	tags := map[string]string{}
-	var targets = map[string]float64{}
+	targets := map[string]float64{} // the lowest, when a contract has several
 	for _, o := range orders {
 		tags[o.ID] = o.Tag
-		if o.Tag == Tag && o.Open && o.Side == "SELL" {
-			targets[o.Symbol] = o.Price
+		if t, ok := targets[o.Symbol]; o.Tag == Tag && o.Open && o.Side == "SELL" && (!ok || o.Price < t) {
+			targets[o.Symbol] = o.Price // reached and placed, not filled yet
+		}
+	}
+	for _, x := range d.targets().List(market.DateOf(d.now()).String()) {
+		if t, ok := targets[x.Symbol]; x.Broker == name && (!ok || x.Price < t) {
+			targets[x.Symbol] = x.Price
 		}
 	}
 	charges := map[string]float64{}

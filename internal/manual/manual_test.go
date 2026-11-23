@@ -117,6 +117,7 @@ func desk(t *testing.T, bs ...*fake) *Desk {
 		Now:       at(10, 0),
 		LimitWait: 30 * time.Millisecond,
 		Poll:      5 * time.Millisecond,
+		Targets:   &Targets{},
 	}
 }
 
@@ -177,7 +178,7 @@ func TestLotsStayInsideTheSpendAndTheOrderCap(t *testing.T) {
 	}
 }
 
-func TestLimitBuySplitsCancelsTheRestAndPlacesTheTarget(t *testing.T) {
+func TestLimitBuySplitsCancelsTheRestAndWatchesTheTarget(t *testing.T) {
 	z := &fake{name: "zerodha", funds: 1e7}
 	z.fillAt = func(o OrderReq) OrderState {
 		if o.Side == "BUY" && o.Qty < 1755 { // the last, smaller order fills half and then waits
@@ -209,11 +210,14 @@ func TestLimitBuySplitsCancelsTheRestAndPlacesTheTarget(t *testing.T) {
 		t.Errorf("cancelled %v, want the unfilled third", z.cancelled)
 	}
 	b := r.Trades[0]
-	if b.Qty != 3575 || len(sells) != 3 || !strings.HasPrefix(sells[2], "SELL LIMIT 65 @") {
-		t.Errorf("bought %+v, sells %v", b, sells)
+	if b.Qty != 3575 || len(sells) != 0 {
+		t.Errorf("bought %+v, sells %v (the target mustn't rest at the broker)", b, sells)
 	}
 	if want, _ := d.Target(nifty, b.Entry, 3575, 2, at(10, 0)()); b.Target != want || b.Target <= 150 {
 		t.Errorf("target %.2f, want %.2f", b.Target, want)
+	}
+	if w := d.Targets.List("2026-11-20"); len(w) != 1 || w[0].Qty != 3575 || w[0].Price != b.Target || w[0].Product != "MIS" {
+		t.Errorf("watched %+v", w)
 	}
 	if len(r.Warnings) != 1 || !strings.Contains(r.Warnings[0], "55 of the 61 lots") {
 		t.Errorf("warnings %v", r.Warnings)
@@ -333,9 +337,10 @@ func TestOverview(t *testing.T) {
 		fills: []Fill{{OrderID: "1", Time: "09:30:00", Symbol: "A", Product: "MIS", Side: "BUY", Qty: 65, Price: 100},
 			{OrderID: "2", Time: "10:30:00", Symbol: "B", Product: "NRML", Side: "SELL", Qty: 65, Price: 90},
 			{OrderID: "3", Time: "10:00:00", Symbol: "B", Product: "NRML", Side: "BUY", Qty: 65, Price: 91.5}},
-		orders: []Order{{ID: "1", Symbol: "A", Tag: Tag, Side: "BUY"}, {ID: "9", Symbol: "A", Tag: Tag, Side: "SELL", Open: true, Price: 104.4},
-			{ID: "2", Symbol: "B", Tag: "hmr1120z02"}}}
+		orders: []Order{{ID: "1", Symbol: "A", Tag: Tag, Side: "BUY"}, {ID: "2", Symbol: "B", Tag: "hmr1120z02"}}}
 	d := desk(t, z)
+	d.Targets.Add(Tracked{Day: "2026-11-20", Broker: "zerodha", Symbol: "A", Qty: 65, Price: 104.4})
+	d.Targets.Add(Tracked{Day: "2026-11-20", Broker: "upstox", Symbol: "A", Qty: 65, Price: 101})
 	d.Now = at(15, 25)
 	v, err := d.Overview(context.Background())
 	if err != nil {
@@ -498,14 +503,13 @@ func TestSplitAboveFiveLakhHalfATMHalfITM(t *testing.T) {
 		if len(r.Warnings) != 0 {
 			t.Errorf("%s: warnings %v", right, r.Warnings)
 		}
-		sells := 0
 		for _, o := range z.placed {
 			if o.Side == "SELL" {
-				sells++
+				t.Errorf("%s: a target sell rests at the broker: %+v", right, o)
 			}
 		}
-		if sells != 3 { // 1950 goes out as 1755 + 195 (the freeze), 1300 as one
-			t.Errorf("%s: %d target sells, want 3", right, sells)
+		if w := d.Targets.List(""); len(w) != 2 || w[0].Symbol != atmSym || w[0].Qty != 1950 || w[1].Symbol != itmSym || w[1].Qty != 1300 {
+			t.Errorf("%s: watched %+v", right, w)
 		}
 	}
 }
@@ -558,5 +562,62 @@ func TestSplitCarriesTheLimitOffsetToITM(t *testing.T) {
 	}
 	if prices[fmt.Sprintf("NIFTY%s25400PE", expiry)] != "LIMIT 148.00" || prices[fmt.Sprintf("NIFTY%s25500PE", expiry)] != "LIMIT 218.00" {
 		t.Errorf("buy prices %v", prices)
+	}
+}
+
+func TestWatchPlacesTheLimitSellOnceTheTargetIsReached(t *testing.T) {
+	sym := fmt.Sprintf("NIFTY%s25400CE", expiry)
+	z := &fake{name: "zerodha", positions: []Position{{Symbol: sym, Name: sym, Exchange: "NFO", Product: "MIS", Qty: 3640}}}
+	d := desk(t, z)
+	d.Targets.Path = t.TempDir() + "/targets.json"
+	ltp := 150.0
+	d.LTP = func(context.Context, Contract) (float64, error) { return ltp, nil }
+	add := func(day string, qty int64, price float64) {
+		if err := d.Targets.Add(Tracked{Day: day, Broker: "zerodha", Symbol: sym, Exchange: "NFO", Product: "MIS",
+			Expiry: expiry.String(), Strike: 25400, Right: "CE", Qty: qty, Entry: 150, Price: price}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("2026-11-19", 65, 140) // yesterday's: dropped, never sold
+	add("2026-11-20", 1950, 153.5)
+	add("2026-11-20", 1690, 160)
+	if err := d.Watch(context.Background()); err != nil || len(z.placed) != 0 {
+		t.Fatalf("below the target: %v %+v", err, z.placed)
+	}
+	if got := (&Targets{Path: d.Targets.Path}).List(""); len(got) != 2 {
+		t.Errorf("kept on disk %+v, want today's two", got)
+	}
+	ltp = 153.5
+	if err := d.Watch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, o := range z.placed {
+		got = append(got, fmt.Sprintf("%s %s %d @ %.2f %s", o.Side, o.Type, o.Qty, o.Price, o.Product))
+	}
+	if strings.Join(got, ", ") != "SELL LIMIT 1755 @ 153.50 MIS, SELL LIMIT 195 @ 153.50 MIS" {
+		t.Errorf("placed %v", got)
+	}
+	if w := d.Targets.List(""); len(w) != 1 || w[0].Price != 160 {
+		t.Errorf("still watched %+v", w)
+	}
+	d.Now = at(15, 21) // after the close the square-off takes over
+	ltp = 170
+	z.placed = nil
+	if d.Watch(context.Background()); len(z.placed) != 0 {
+		t.Errorf("sold after 15:20: %+v", z.placed)
+	}
+}
+
+func TestExitStopsWatchingTheTarget(t *testing.T) {
+	sym := fmt.Sprintf("NIFTY%s25400CE", expiry)
+	z := &fake{name: "zerodha", positions: []Position{{Symbol: sym, Name: sym, Exchange: "NFO", Product: "MIS", Qty: 65}}}
+	d := desk(t, z)
+	d.Targets.Add(Tracked{Day: "2026-11-20", Broker: "zerodha", Symbol: sym, Qty: 65, Price: 160})
+	if _, err := d.Exit(context.Background(), "zerodha", sym, "NFO", "MIS"); err != nil {
+		t.Fatal(err)
+	}
+	if w := d.Targets.List(""); len(w) != 0 {
+		t.Errorf("still watched %+v", w)
 	}
 }
