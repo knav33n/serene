@@ -105,7 +105,7 @@ const usage = `serene researches and trades Indian index options.
 
   serene backup               [--dry-run] [--config configs/backup.yaml]   (mirror data/ and ~/INSIGHTS onto the Seagate drive; run at end of day)
 
-  serene paper hmacross       [--slack] [--date DATE] [--step 100] [--warm 4]   (nifty_hma_crossover: every 10m HMA 13/34 cross of the ATM CE/PE, with Zerodha buttons; no orders of its own)
+  serene paper hmacross       [--slack [--exit]] [--date DATE] [--step 100] [--warm 4]   (nifty_hma_crossover: every 10m HMA 13/34 cross of the ATM CE/PE, with Zerodha buttons; --exit squares off the buttons' buys on a down-cross)
   serene slack delete         --channel NAME [--yes]   (delete the app's own messages and thread replies in a channel; counts only without --yes)
   serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
 

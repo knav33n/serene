@@ -132,3 +132,55 @@ func TestHMACrossButtonsDedicated(t *testing.T) {
 		t.Errorf("down-cross on the PE: want the buys and Sell PE, got %s", down)
 	}
 }
+
+type fakeExitKite struct {
+	fakeOptKite
+	orders []kite.Order
+}
+
+func (f *fakeExitKite) Orders(context.Context) ([]kite.Order, error) { return f.orders, nil }
+
+func TestHMACrossExitSellsOnlyTheButtonsBuys(t *testing.T) {
+	now := time.Date(2026, 11, 23, 14, 35, 20, 0, market.IST)
+	sym := "NIFTY26NOV25900PE"
+	o := func(side, tag string, filled int64) kite.Order {
+		return kite.Order{Symbol: sym, Exchange: "NFO", Product: "MIS", Side: side, Tag: tag, Filled: filled, Status: "COMPLETE"}
+	}
+	f := &fakeExitKite{orders: []kite.Order{
+		o("BUY", "slack1123123219", 65),
+		o("BUY", "slack1123130000", 130),
+		o("SELL", "slack1123131000", 65), // a Sell button click
+		o("BUY", "serenemanual", 650),    // the manual desk's: not ours
+		{Symbol: sym, Exchange: "NFO", Product: "NRML", Side: "BUY", Tag: "slack1123123000", Filled: 65},
+	}}
+	f.pos = []kite.Position{{Symbol: sym, Exchange: "NFO", Product: "MIS", Qty: 780}}
+	ctx := context.Background()
+	msg, err := hmaCrossExit(ctx, f, sym, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.placed) != 1 {
+		t.Fatalf("placed %+v", f.placed)
+	}
+	if p := f.placed[0]; p.Side != "SELL" || p.Qty != 130 || p.Type != "MARKET" || p.Product != "MIS" || !strings.HasPrefix(p.Tag, hmaCrossExitTag) {
+		t.Errorf("sell %+v: want 130 = 65+130−65 at market", p)
+	}
+	if !strings.Contains(msg, "square-off") {
+		t.Errorf("message %q", msg)
+	}
+	// Held less than bought (sold on Kite by hand): only what's held.
+	f.placed, f.pos = nil, []kite.Position{{Symbol: sym, Exchange: "NFO", Product: "MIS", Qty: 65}}
+	if _, err := hmaCrossExit(ctx, f, sym, now); err != nil || len(f.placed) != 1 || f.placed[0].Qty != 65 {
+		t.Errorf("want 65 sold, got %+v %v", f.placed, err)
+	}
+	// Nothing held, or only the desk's: nothing placed.
+	f.placed, f.pos = nil, nil
+	if msg, err := hmaCrossExit(ctx, f, sym, now); err != nil || msg != "" || len(f.placed) != 0 {
+		t.Errorf("nothing held: %q %v %+v", msg, err, f.placed)
+	}
+	f.orders = []kite.Order{o("BUY", "serenemanual", 650)}
+	f.pos = []kite.Position{{Symbol: sym, Exchange: "NFO", Product: "MIS", Qty: 650}}
+	if _, err := hmaCrossExit(ctx, f, sym, now); err != nil || len(f.placed) != 0 {
+		t.Errorf("sold the desk's position: %+v %v", f.placed, err)
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -22,7 +23,8 @@ const hmaCrossMaxAge = 15 * time.Minute
 // runHMACross posts nifty_hma_crossover's signals: each run fetches the day's
 // ATM NIFTY CE and PE minute bars from Kite, builds 10-minute bars, and posts
 // every HMA 13/34 cross of the day not yet posted, with Zerodha buy and sell
-// buttons for both legs. It places no order itself.
+// buttons for both legs. With --exit, a fresh down-cross also squares off,
+// at market, what the strategy's buttons bought of that leg today.
 func runHMACross(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("paper hmacross", flag.ContinueOnError)
 	useSlack := fs.Bool("slack", false, "post new crosses to SLACK_PAPER_CHANNEL")
@@ -32,6 +34,7 @@ func runHMACross(ctx context.Context, args []string) error {
 	alertPath := fs.String("alert", "data/hmacross_alert.json", "whether a failure has been posted")
 	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
 	warm := fs.Int("warm", 4, "prior trading days of bars to warm the averages")
+	exit := fs.Bool("exit", false, "with --slack: on a fresh down-cross, sell on Zerodha what the Buy buttons bought of that leg today (REAL orders)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -59,13 +62,16 @@ func runHMACross(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	err = hmaCross(ctx, client, channel, d, now, *dir, *sentPath, *step, *warm)
+	if *exit && client == nil {
+		return errors.New("--exit needs --slack")
+	}
+	err = hmaCross(ctx, client, channel, d, now, *dir, *sentPath, *step, *warm, *exit)
 	alertOnce(ctx, client, channel, *alertPath, "serene paper "+paper.HMACrossName, err)
 	return err
 }
 
 func hmaCross(ctx context.Context, client *slack.Client, channel string, d market.Date, now time.Time,
-	dir, sentPath string, step float64, warm int) error {
+	dir, sentPath string, step float64, warm int, exit bool) error {
 	kc, err := kiteClient(ctx)
 	if err != nil {
 		return err
@@ -101,7 +107,13 @@ func hmaCross(ctx context.Context, client *slack.Client, channel string, d marke
 			d, market.Rupees(st.Strike), st.Expiry, cfg.TF, cfg.Fast, cfg.Slow)
 		return nil
 	}
-	return postHMACrosses(ctx, client, channel, st, cfg, crosses, now, sentPath)
+	var exitFn func(ctx context.Context, symbol string) (string, error)
+	if exit {
+		exitFn = func(ctx context.Context, symbol string) (string, error) {
+			return hmaCrossExit(ctx, kc, symbol, time.Now())
+		}
+	}
+	return postHMACrosses(ctx, client, channel, st, cfg, crosses, now, sentPath, exitFn)
 }
 
 // hmaCrossBars is Kite's minute candles, whole minutes in the session up to
@@ -130,7 +142,7 @@ func hmaCrossBars(inst market.Instrument, cs []kite.Candle, d market.Date, now t
 }
 
 func postHMACrosses(ctx context.Context, client *slack.Client, channel string, st *paperDayState, cfg paper.CrossConfig,
-	crosses []paper.Cross, now time.Time, sentPath string) error {
+	crosses []paper.Cross, now time.Time, sentPath string, exit func(ctx context.Context, symbol string) (string, error)) error {
 	sent, err := loadSent(sentPath)
 	if err != nil {
 		return err
@@ -152,14 +164,33 @@ func postHMACrosses(ctx context.Context, client *slack.Client, channel string, s
 		if client == nil {
 			continue
 		}
+		recent := now.Sub(c.End) <= hmaCrossMaxAge
+		// The square-off goes first: it's the time-critical part.
+		var exitMsg string
+		if exit != nil && recent && !c.Up {
+			if sym := hmaCrossLegSymbol(st, c); sym != "" {
+				msg, err := exit(ctx, sym)
+				if err != nil {
+					msg = fmt.Sprintf(":rotating_light: square-off of %s on the down-cross failed: %v; sell it on Kite", sym, err)
+				}
+				exitMsg = msg
+				fmt.Println(msg)
+			}
+		}
 		blocks := []slack.Block{slack.SectionBlock(text)}
-		if buttons && now.Sub(c.End) <= hmaCrossMaxAge {
+		if buttons && recent {
 			if row := hmaCrossButtons(st, c); row != nil {
 				blocks = append(blocks, row)
 			}
 		}
-		if _, err := client.PostBlocks(ctx, channel, text, blocks); err != nil {
+		ts, err := client.PostBlocks(ctx, channel, text, blocks)
+		if err != nil {
 			return err
+		}
+		if exitMsg != "" {
+			if err := client.Reply(ctx, channel, ts, exitMsg); err != nil {
+				fmt.Fprintln(os.Stderr, "slack reply:", err)
+			}
 		}
 		sent[id] = true
 		if err := saveSent(sentPath, sent); err != nil {
@@ -214,6 +245,84 @@ func hmaCrossButtons(st *paperDayState, c paper.Cross) slack.Block {
 		bs = append(bs, *sell)
 	}
 	return manual.OrderButtons(bs...)
+}
+
+// hmaCrossLegSymbol is the Kite symbol of the leg c crossed on.
+func hmaCrossLegSymbol(st *paperDayState, c paper.Cross) string {
+	for _, l := range st.Legs {
+		if l.Right == c.Instrument.Right {
+			return l.Symbol
+		}
+	}
+	return ""
+}
+
+// hmaCrossExitTag marks the down-cross square-off's orders.
+const hmaCrossExitTag = "hmaexit"
+
+// exitBroker is the part of Kite hmaCrossExit uses.
+type exitBroker interface {
+	Orders(ctx context.Context) ([]kite.Order, error)
+	Positions(ctx context.Context) ([]kite.Position, error)
+	PlaceOrder(ctx context.Context, o kite.OrderRequest) (string, error)
+	OrderStatus(ctx context.Context, id string) (kite.Order, error)
+}
+
+// hmaCrossExit sells at market, MIS, what the Buy buttons bought of symbol on
+// Zerodha today and haven't sold: the buttons' filled buys less the buttons'
+// and earlier square-offs' filled sells, at most the MIS quantity held. MIS
+// bought some other way (the manual desk) is left alone. "" when there's
+// nothing to sell.
+func hmaCrossExit(ctx context.Context, kc exitBroker, symbol string, now time.Time) (string, error) {
+	orders, err := kc.Orders(ctx)
+	if err != nil {
+		return "", fmt.Errorf("kite orders: %w", err)
+	}
+	var mine int64
+	for _, o := range orders {
+		if o.Symbol != symbol || o.Exchange != "NFO" || o.Product != "MIS" ||
+			!(strings.HasPrefix(o.Tag, "slack") || strings.HasPrefix(o.Tag, hmaCrossExitTag)) {
+			continue
+		}
+		if strings.EqualFold(o.Side, "BUY") {
+			mine += o.Filled
+		} else {
+			mine -= o.Filled
+		}
+	}
+	ps, err := kc.Positions(ctx)
+	if err != nil {
+		return "", fmt.Errorf("kite positions: %w", err)
+	}
+	var held int64
+	for _, p := range ps {
+		if p.Exchange == "NFO" && p.Symbol == symbol && p.Product == "MIS" {
+			held += p.Qty
+		}
+	}
+	qty := min(mine, held)
+	if qty <= 0 {
+		return "", nil
+	}
+	tag := hmaCrossExitTag + now.In(market.IST).Format("0102150405")
+	var lines []string
+	var errs []error
+	for left := qty; left > 0; {
+		q := min(left, niftyFreezeQty)
+		left -= q
+		id, err := kc.PlaceOrder(ctx, kite.OrderRequest{Exchange: "NFO", Symbol: symbol, Side: "SELL", Type: "MARKET", Product: "MIS", Qty: q, Tag: tag})
+		if err != nil {
+			errs = append(errs, err)
+			break
+		}
+		msg, err := awaitFill(ctx, kc, id, fmt.Sprintf("down-cross square-off: SELL %d %s on Zerodha (order %s)", q, symbol, id))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		lines = append(lines, msg)
+	}
+	return strings.Join(lines, "\n"), errors.Join(errs...)
 }
 
 // optBroker is the part of Kite placeOpt uses, so tests can fake it.

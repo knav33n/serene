@@ -1,5 +1,5 @@
 [Unit]
-Description=serene nifty_hma_crossover: 10m HMA 13/34 crosses of the ATM NIFTY CE/PE, to Slack with buy/sell buttons (no orders of its own)
+Description=serene nifty_hma_crossover: 10m HMA 13/34 crosses of the ATM NIFTY CE/PE, to Slack with buy/sell buttons; squares off the buttons' buys on a down-cross
 Wants=network-online.target
 After=network-online.target postgresql.service
 
@@ -8,5 +8,5 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-ExecStart=/home/serene/app/serene paper hmacross --slack
+ExecStart=/home/serene/app/serene paper hmacross --slack --exit
 TimeoutStartSec=5min
