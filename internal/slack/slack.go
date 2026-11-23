@@ -44,6 +44,10 @@ func (c *Client) do(req *http.Request, out any) error {
 	if err != nil {
 		return err
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
+		return &RateLimited{After: time.Duration(max(wait, 1)) * time.Second}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("slack: HTTP %d", resp.StatusCode)
 	}

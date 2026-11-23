@@ -106,6 +106,7 @@ const usage = `serene researches and trades Indian index options.
   serene backup               [--dry-run] [--config configs/backup.yaml]   (mirror data/ and ~/INSIGHTS onto the Seagate drive; run at end of day)
 
   serene paper hmacross       [--slack] [--date DATE] [--step 100] [--warm 4]   (nifty_hma_crossover: every 10m HMA 13/34 cross of the ATM CE/PE, with Zerodha buttons; no orders of its own)
+  serene slack delete         --channel NAME [--yes]   (delete the app's own messages and thread replies in a channel; counts only without --yes)
   serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
 
 Not built yet:
@@ -274,6 +275,8 @@ func run(ctx context.Context, args []string) error {
 		return runFyers(ctx, args[1], rest)
 	case "forward signals":
 		return runForwardSignals(ctx, rest)
+	case "slack delete":
+		return runSlackDelete(ctx, rest)
 	case "paper hmacross":
 		return runHMACross(ctx, rest)
 	case "live jade":
