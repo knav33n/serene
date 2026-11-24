@@ -60,7 +60,7 @@ func runForwardSignals(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("forward signals", flag.ContinueOnError)
 	useSlack := fs.Bool("slack", false, "post new signals to SLACK_TRADES_CHANNEL, SILVERM ones to SLACK_SILVERM_CHANNEL if set")
 	fetch := fs.Bool("fetch", false, "fetch the MCX strategies' minute bars from Kite first")
-	only := fs.String("strategies", "goldm_ema_15m", "comma-separated: goldm_ema_15m, goldm_hma_1h, silverm_ema_15m, silverm_hma_1h, ema_cross_first")
+	only := fs.String("strategies", "goldm_ema_15m", "comma-separated: goldm_ema_15m, goldm_hma_1h, silverm_ema_15m, silverm_hma_1h, goldm_hmasma_10m, silverm_hmasma_10m, ema_cross_first")
 	sentPath := fs.String("sent", "data/forward_sent.json", "signals already posted")
 	alertPath := fs.String("alert", "data/forward_alert.json", "whether a failure has been posted")
 	niftyCfg := fs.String("nifty-config", "configs/ema_cross_first_forward.yaml", "ema_cross_first forward config")
@@ -161,7 +161,7 @@ func forwardSignals(ctx context.Context, client *slack.Client, route func(strate
 				return fmt.Errorf("ema_cross_first: %w", err)
 			}
 			all = append(all, s...)
-		case "goldm_ema_15m", "goldm_hma_1h", "silverm_ema_15m", "silverm_hma_1h":
+		case "goldm_ema_15m", "goldm_hma_1h", "silverm_ema_15m", "silverm_hma_1h", "goldm_hmasma_10m", "silverm_hmasma_10m":
 			s, err := mcxSignals(ctx, mcxDir, mcxCosts, strings.TrimSpace(name))
 			if err != nil {
 				return fmt.Errorf("%s: %w", strings.TrimSpace(name), err)
@@ -355,7 +355,7 @@ func emaCrossFirstSignals(ctx context.Context, path string) ([]fwdSignal, error)
 }
 
 // mcxSignals replays a frozen MCX strategy (goldm_ema_15m, goldm_hma_1h,
-// silverm_ema_15m or silverm_hma_1h) from its forward start. The last
+// silverm_ema_15m, silverm_hma_1h or a hmasma_10m) from its forward start. The last
 // trade's "end" exit is only where the data stops, so it is left out: that
 // position is still open.
 func mcxSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal, error) {
@@ -381,10 +381,14 @@ func mcxSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal,
 // fetched bar. The last trade, if it ends "end", is the position held now.
 func mcxTrades(ctx context.Context, dir, costsFile, strat string) ([]mcx.Trade, error) {
 	name, start := gemName, gemForward
+	hs := hsStrategies[strat] != ""
+	if hs {
+		name, start = hsStrategies[strat], hsForward
+	}
 	if strat == "goldm_hma_1h" {
 		start = ghmForward
 	}
-	if mcxForwardUnderlying(strat) == smName {
+	if !hs && mcxForwardUnderlying(strat) == smName {
 		name, start = smName, smForward
 	}
 	spec, ok := mcx.Specs[name]
@@ -415,6 +419,8 @@ func mcxTrades(ctx context.Context, dir, costsFile, strat string) ([]mcx.Trade, 
 	frame, cfg := gemFrame, mcx.EMAConfig{Name: gemName, Spec: spec, Frame: gemFrame, Fast: gemFast, Slow: gemSlow,
 		Slip: 1, Costs: costs, From: gemForward, To: to}
 	switch {
+	case hs:
+		frame, cfg = hsFrame, hsConfig(name, spec, costs, 1, hsForward, to)
 	case strat == "goldm_hma_1h":
 		frame, cfg = ghmFrame, ghmConfig(spec, costs, 1, ghmForward, to)
 	case name == smName:

@@ -31,6 +31,7 @@ type EMAConfig struct {
 	LongOnly   bool                              // flat, not short, while fast is under slow
 	MinGap     float64                           // percent of slow the EMAs must part by to flip; inside it the side is kept
 	MA         func([]market.Bar, int) []float64 // average used for both lines; nil is indicator.EMA
+	SlowMA     func([]market.Bar, int) []float64 // average of the slow line only; nil is MA
 	Slope      bool                              // compare fast with itself two frame bars back, not with slow
 	// StructPct > 0 gates the side by Dow structure on the frame bars: a
 	// zigzag of StructPct percent of the contract's mean close marks swings,
@@ -138,6 +139,10 @@ func EMABacktest(ed *EMAData, cfg EMAConfig) ([]Trade, error) {
 	if ma == nil {
 		ma = indicator.EMA
 	}
+	slowMA := cfg.SlowMA
+	if slowMA == nil {
+		slowMA = ma
+	}
 	for k, f := range sr.frames[cfg.Frame] {
 		fast[k] = ma(f, cfg.Fast)
 		if cfg.Slope {
@@ -150,7 +155,7 @@ func EMABacktest(ed *EMAData, cfg EMAConfig) ([]Trade, error) {
 			}
 			slow[k] = s
 		} else {
-			slow[k] = ma(f, cfg.Slow)
+			slow[k] = slowMA(f, cfg.Slow)
 		}
 	}
 	swings := map[string][]dow.Swing{}

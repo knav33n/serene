@@ -66,6 +66,7 @@ const usage = `serene researches and trades Indian index options.
   serene research mcxemaexit  [--frame 15] [--fast 13] [--slow 34] [--from DATE] [--to DATE]   (EMA cross exit rules)
   serene research mcxhma      [--name GOLDM] [--from DATE] [--to DATE] [--split DATE] [--slip-ticks 1]   (Hull MA crosses and turns)
   serene research mcxmetals   [--names COPPER,ZINCMINI,...] [--from DATE] [--to DATE] [--split DATE] [--slip-ticks 1]   (EMA + Hull crosses on base metals)
+  serene research mcxma10     [--names GOLDM,SILVERM] [--frame 10m] [--to DATE] [--split DATE] [--slip-ticks 1]   (SMA/EMA/HMA fast×slow mixes)
   serene research mcxstruct   (goldm/silverm_hma_1h gated by Dow HH/HL, LH/LL structure; research only)
   serene research mcxhmafwd   [--to DATE] [--judge] [--replay]   (frozen GOLDM 1h HMA-21 turn, sessions from 2026-11-11)
   serene research mcxemafwd   [--to DATE] [--judge] [--replay]   (frozen GOLDM 15m 13/34, sessions from 2026-11-11)
@@ -113,6 +114,7 @@ Not built yet:
   serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
   serene forward buttons-test [--strategy goldm_hma_1h] [--side buy] [--channel ID]   (post a test futures button; click them against serene manual --slack --slack-dry-run)
   serene live jade            [--slack] [--check] [--decide-at 15:20] [--buffer 0.02]   (NIFTY Jade Lizard, ~200 credit, 1 lot on Zerodha NRML; 50% take profit, exit at 21 days)
+  serene live mcx             [--slack] [--check] [--strategies goldm_hmasma_10m,silverm_hmasma_10m] [--min-days 20] [--channel C0CH2BZU202]   (10m HMA34/SMA89 cross, one lot each on Zerodha NRML, from the next cross)
   serene prod paper, serene prod live
 `
 
@@ -226,6 +228,8 @@ func run(ctx context.Context, args []string) error {
 		return runMCXHMA(ctx, rest)
 	case "research mcxmetals":
 		return runMCXMetals(ctx, rest)
+	case "research mcxma10":
+		return runMCXMA10(ctx, rest)
 	case "research silvermfwd":
 		return runSilvermForward(ctx, rest)
 	case "forward buttons-test":
@@ -280,6 +284,8 @@ func run(ctx context.Context, args []string) error {
 		return runHMACross(ctx, rest)
 	case "live jade":
 		return runLiveJade(ctx, rest)
+	case "live mcx":
+		return runLiveMCX(ctx, rest)
 	case "paper pdlswing":
 		return runPDLPaper(ctx, rest)
 	case "prod paper", "prod live":

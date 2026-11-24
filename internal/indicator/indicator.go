@@ -30,6 +30,25 @@ func EMA(bars []market.Bar, n int) []float64 {
 	return out
 }
 
+// SMA returns the n-bar simple moving average of closes in rupees. It is NaN
+// for the first n−1 bars.
+func SMA(bars []market.Bar, n int) []float64 {
+	out := make([]float64, len(bars))
+	sum := 0.0
+	for i, b := range bars {
+		sum += b.Close.Rupees()
+		if i >= n {
+			sum -= bars[i-n].Close.Rupees()
+		}
+		if i < n-1 {
+			out[i] = math.NaN()
+		} else {
+			out[i] = sum / float64(n)
+		}
+	}
+	return out
+}
+
 // VWAP returns the session volume-weighted average of the typical price
 // (high+low+close)/3 in rupees, restarting each day. Before any volume trades
 // in a session it is that bar's typical price.

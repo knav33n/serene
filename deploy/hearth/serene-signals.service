@@ -1,5 +1,5 @@
 [Unit]
-Description=serene forward-test signals (goldm_hma_1h, silverm_hma_1h) to Slack
+Description=serene goldm/silverm_hmasma_10m: signals to Slack, then live Zerodha orders
 Wants=network-online.target
 After=network-online.target postgresql.service
 
@@ -8,6 +8,9 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-# goldm/silverm_ema_15m stopped 2026-11-24. Live MCX orders were switched off on 2026-11-20 and their code removed on 2026-11-23; the signals still post.
-ExecStart=/home/serene/app/serene forward signals --fetch --slack --strategies goldm_hma_1h,silverm_hma_1h
+# goldm/silverm_ema_15m stopped 2026-11-24, goldm/silverm_hma_1h stopped later that day.
+# goldm/silverm_hmasma_10m trade LIVE on Zerodha from 2026-11-24, 1 lot each, from their next cross.
+# The signal step may fail without stopping the live step, which reads the bars it fetched.
+ExecStart=-/home/serene/app/serene forward signals --fetch --slack --strategies goldm_hmasma_10m,silverm_hmasma_10m
+ExecStart=/home/serene/app/serene live mcx --slack --channel C0CH2BZU202
 TimeoutStartSec=10min
