@@ -1,4 +1,14 @@
-# goldm_hmasma_10m, silverm_hmasma_10m: live
+# goldm_hmasma_10m, silverm_hmasma_10m: stopped
+
+**Stopped 2026-11-24, before its first trade**, at the user's request ("drop this
+crossover for all metals"). hearth's serene-signals unit is removed, so neither
+signals nor orders run. No position was ever opened: go-live fell on a holiday,
+and MCX's evening session had not opened. Why: on Fyers history 2019–2026
+(reports/mcxma10_fyers/) this rule's drawdowns were the deepest of the 34/89
+crosses tested. GOLDM went 1,237 days without a new high from Aug 2020 to the
+end of 2023, and its 2026 mark-to-market drawdown was ₹4.58L. SILVERM spent
+739 days under water in 2021–23.
+
 
 Frozen 2026-11-24 and traded LIVE on Zerodha from that day, at the user's
 request. The rule is in `cmd/serene/hmasma.go` and must not change; a change
