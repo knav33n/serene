@@ -27,8 +27,10 @@ type Server struct {
 	// Slack, when set, takes Slack's button clicks at POST /slack/actions.
 	// Slack signs them, so they skip the page's login and Origin checks.
 	Slack http.Handler
-	UI    fs.FS
-	Log   func(format string, a ...any)
+	// MCX, when set, is the Gold & Silver page's data at POST /api/mcx.
+	MCX func(ctx context.Context) (any, error)
+	UI  fs.FS
+	Log func(format string, a ...any)
 }
 
 func (s *Server) logf(format string, a ...any) {
@@ -65,6 +67,11 @@ func (s *Server) Handler() http.Handler {
 		}
 		return s.Desk.Exit(ctx, r.Broker, r.Symbol, r.Exchange, r.Product)
 	}))
+	if s.MCX != nil {
+		mux.HandleFunc("POST /api/mcx", s.action(func(ctx context.Context, _ json.RawMessage) (any, error) {
+			return s.MCX(ctx)
+		}))
+	}
 	mux.HandleFunc("GET /", s.page)
 	if s.Slack == nil {
 		return s.guard(mux)

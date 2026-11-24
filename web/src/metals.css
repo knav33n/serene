@@ -1,0 +1,46 @@
+/* The Gold & Silver page, on manual.css's desk. Gold and silver each carry their own hue. */
+:root { --gold: #b07a00; --gold-soft: #f6ecd3; --silver: #5f7182; --silver-soft: #e6ebef; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --gold: #e6b44a; --gold-soft: #3a2f17; --silver: #a9b8c6; --silver-soft: #262f38; } }
+:root[data-theme="dark"] { --gold: #e6b44a; --gold-soft: #3a2f17; --silver: #a9b8c6; --silver-soft: #262f38; }
+
+.mcards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mcard { --m: var(--gold); --m-soft: var(--gold-soft); position: relative; overflow: hidden; display: grid; gap: 10px;
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 16px; padding: 18px 20px; box-shadow: var(--glow); }
+.mcard.silver { --m: var(--silver); --m-soft: var(--silver-soft); }
+.mcard::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; background: var(--m); }
+.mcard::after { content: ""; position: absolute; inset: -50% -15% auto auto; width: 360px; height: 360px; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--m) 14%, transparent), transparent); }
+.mcard > * { position: relative; z-index: 1; }
+.mhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.mhead h2 { color: var(--m); font-size: 22px; }
+.mnet { font: 780 clamp(32px, 4.4vw, 46px)/1 var(--display); font-stretch: 80%; font-variant-numeric: tabular-nums; }
+.msplit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.msplit > div { display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.msplit .k { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); font-weight: 600; }
+
+.mtag { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.mtag::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
+.mtag.silver::before { background: var(--silver); }
+.mside { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; padding: 4px 7px; border-radius: 5px; }
+.mside.long { background: var(--ce-soft); color: var(--ce); } .mside.short { background: var(--pe-soft); color: var(--pe); }
+
+.strats { display: grid; gap: 8px; }
+.strat { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 12px; padding: 11px 14px; }
+.strat .sstat { font-weight: 500; }
+.strat.halted { border-color: var(--live); } .strat.halted .sstat { color: var(--live); font-weight: 600; }
+
+.mfilter { display: inline-flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--off-soft); justify-self: start; }
+.mfilter button { all: unset; cursor: pointer; padding: 6px 14px; border-radius: 7px; font-weight: 600; font-size: 13px; color: var(--ink-3); }
+.mfilter button[aria-checked="true"] { background: var(--panel); color: var(--ink); box-shadow: var(--glow); }
+.mfilter button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pagetabs { display: inline-flex; gap: 4px; }
+.pagetabs a { padding: 6px 12px; border-radius: 8px; font: 650 14px/1 var(--display); font-stretch: 88%; color: var(--ink-3); text-decoration: none; }
+.pagetabs a:hover { color: var(--ink); background: var(--hover); }
+.pagetabs a[aria-current="page"] { color: var(--accent); background: var(--accent-soft); }
+
+@media (max-width: 640px) {
+  .mcards { grid-template-columns: minmax(0, 1fr); }
+}

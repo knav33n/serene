@@ -183,6 +183,8 @@ func runManual(ctx context.Context, args []string) error {
 	dryRun := fs.Bool("slack-dry-run", false, "Slack's futures buttons check the order on Kite and reply, but place nothing")
 	targetsPath := fs.String("targets", "data/manual/targets.json", "the targets being watched, kept across restarts")
 	wait := fs.Duration("limit-wait", 60*time.Second, "how long a LIMIT buy waits before what's left is cancelled")
+	liveDir := fs.String("live-dir", "data/live", "the live MCX strategies' state, for the Gold & Silver page")
+	mcxReport := fs.String("mcx-report", "reports/live_mcx.csv", "the live MCX strategies' closed trades, for the Gold & Silver page")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -267,7 +269,8 @@ func runManual(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	srv := &manual.Server{Addr: *addr, Public: *public, Gate: gate, Desk: desk, UI: web.Dist(), Log: logf}
+	srv := &manual.Server{Addr: *addr, Public: *public, Gate: gate, Desk: desk, UI: web.Dist(), Log: logf,
+		MCX: func(ctx context.Context) (any, error) { return mcxPageData(ctx, cl.zerodha, *liveDir, *mcxReport) }}
 	if slackActions != nil {
 		srv.Slack = slackActions
 		if *dryRun {
