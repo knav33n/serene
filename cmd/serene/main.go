@@ -111,7 +111,7 @@ const usage = `serene researches and trades Indian index options.
 
 Not built yet:
   serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
-  serene forward buttons-test [--strategy goldm_hma_1h] [--channel ID]   (post test futures buttons; click them against serene manual --slack --slack-dry-run)
+  serene forward buttons-test [--strategy goldm_hma_1h] [--side buy] [--channel ID]   (post a test futures button; click them against serene manual --slack --slack-dry-run)
   serene live jade            [--slack] [--check] [--decide-at 15:20] [--buffer 0.02]   (NIFTY Jade Lizard, ~200 credit, 1 lot on Zerodha NRML; 50% take profit, exit at 21 days)
   serene prod paper, serene prod live
 `

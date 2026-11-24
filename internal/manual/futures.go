@@ -57,22 +57,16 @@ func ParseFutOrder(v string) (FutOrder, error) {
 	return o, nil
 }
 
-// FutButtons is the row of buttons under a signal: buy each contract, then
-// sell each. labels name each contract on its button, e.g. its expiry.
-func FutButtons(strategy string, syms, labels []string) slack.Block {
-	var bs []OrderButton
-	for _, side := range []market.Side{market.Buy, market.Sell} {
-		style := "primary"
-		if side == market.Sell {
-			style = "danger"
-		}
-		for i, sym := range syms {
-			bs = append(bs, OrderButton{Order: FutOrder{Strategy: strategy, Side: side, Symbol: sym},
-				Text: fmt.Sprintf("%s %s (%s)", sideWord(side), sym, labels[i]), Style: style,
-				Confirm: fmt.Sprintf("*%s 1 lot %s* on Zerodha at market (NRML), for %s.", sideWord(side), sym, strategy)})
-		}
+// FutButtons is the button under a signal: one lot of sym on the signal's
+// side only. label names the contract on the button, e.g. its expiry.
+func FutButtons(strategy string, side market.Side, sym, label string) slack.Block {
+	style := "primary"
+	if side == market.Sell {
+		style = "danger"
 	}
-	return OrderButtons(bs...)
+	return OrderButtons(OrderButton{Order: FutOrder{Strategy: strategy, Side: side, Symbol: sym},
+		Text: fmt.Sprintf("%s %s (%s)", sideWord(side), sym, label), Style: style,
+		Confirm: fmt.Sprintf("*%s 1 lot %s* on Zerodha at market (NRML), for %s.", sideWord(side), sym, strategy)})
 }
 
 // OrderButton is one button of an order row; Confirm says what it places.

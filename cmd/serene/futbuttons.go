@@ -19,12 +19,27 @@ import (
 	"serene/internal/slack"
 )
 
-// futButtonStrategies are the forward signals posted with Zerodha buttons for
-// the current and next futures.
+// futButtonStrategies are the forward signals posted with a Zerodha button:
+// the signal's side only, on the nearest future at least futMinDays from expiry.
 var futButtonStrategies = []string{"goldm_hma_1h", "silverm_hma_1h"}
 
 // futButtonsMaxAge: an older signal (a backfill) is posted without buttons.
 const futButtonsMaxAge = 15 * time.Minute
+
+// futMinDays: a button's future has at least this many days to expiry.
+const futMinDays = 15
+
+// buttonFuture is the nearest of futs (nearest first) expiring at least
+// futMinDays after today.
+func buttonFuture(futs []kite.Instrument, today market.Date) (kite.Instrument, bool) {
+	cut := today.AddDays(futMinDays)
+	for _, f := range futs {
+		if !f.Expiry.Before(cut) {
+			return f, true
+		}
+	}
+	return kite.Instrument{}, false
+}
 
 // mcxFutures is name's MCX futures on Kite not yet expired, nearest first.
 func mcxFutures(ins []kite.Instrument, name string, today market.Date) []kite.Instrument {
@@ -110,8 +125,8 @@ func placeFut(ctx context.Context, kc *kite.Client, o manual.FutOrder, now time.
 	return awaitFill(ctx, kc, id, fmt.Sprintf("%s 1 lot %s on Zerodha (order %s)", side, o.Symbol, id))
 }
 
-// futContracts gives a fresh signal its buttons: buy and sell on the current
-// and next futures. Kite's MCX list is read once per run, on the first need.
+// futContracts gives a fresh entry signal its button: its side, on the
+// nearest future with futMinDays to go. Kite's MCX list is read once per run, on the first need.
 type futContracts struct {
 	on     bool
 	loaded bool
@@ -120,11 +135,13 @@ type futContracts struct {
 
 func newFutContracts(on bool) *futContracts { return &futContracts{on: on} }
 
-// row is the signal's buttons, or nil: buttons are off, the strategy has
-// none, the signal is a backfill, or Kite's contracts can't be read (the
+// row is the signal's button, or nil: buttons are off, the strategy has
+// none, the signal is an exit or a backfill, or Kite's contracts can't be read (the
 // signal then posts as text, which matters more than its buttons).
 func (f *futContracts) row(ctx context.Context, s fwdSignal, now time.Time) slack.Block {
-	if !f.on || !slices.Contains(futButtonStrategies, s.Strategy) || now.Sub(s.Time) > futButtonsMaxAge {
+	// A reversal posts its exit and its entry on the same side: only the
+	// entry gets the button, so one click is one lot.
+	if !f.on || !slices.Contains(futButtonStrategies, s.Strategy) || s.Note != "enter" || now.Sub(s.Time) > futButtonsMaxAge {
 		return nil
 	}
 	if !f.loaded {
@@ -137,16 +154,12 @@ func (f *futContracts) row(ctx context.Context, s fwdSignal, now time.Time) slac
 			fmt.Fprintln(os.Stderr, "serene: no futures buttons:", err)
 		}
 	}
-	futs := mcxFutures(f.ins, mcxForwardUnderlying(s.Strategy), market.DateOf(now.In(market.IST)))
-	if len(futs) == 0 {
+	today := market.DateOf(now.In(market.IST))
+	c, ok := buttonFuture(mcxFutures(f.ins, mcxForwardUnderlying(s.Strategy), today), today)
+	if !ok {
 		return nil
 	}
-	futs = futs[:min(2, len(futs))]
-	syms, labels := make([]string, len(futs)), make([]string, len(futs))
-	for i, c := range futs {
-		syms[i], labels[i] = c.Symbol, fmt.Sprintf("%02d/%02d/%04d", c.Expiry.Day, int(c.Expiry.Month), c.Expiry.Year)
-	}
-	return manual.FutButtons(s.Strategy, syms, labels)
+	return manual.FutButtons(s.Strategy, s.Side, c.Symbol, fmt.Sprintf("%02d/%02d/%04d", c.Expiry.Day, int(c.Expiry.Month), c.Expiry.Year))
 }
 
 // runFutButtonsTest posts a test signal with the futures buttons, by default
@@ -155,12 +168,21 @@ func (f *futContracts) row(ctx context.Context, s fwdSignal, now time.Time) slac
 func runFutButtonsTest(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("forward buttons-test", flag.ContinueOnError)
 	strat := fs.String("strategy", "goldm_hma_1h", "goldm_hma_1h or silverm_hma_1h")
+	sideFlag := fs.String("side", "buy", "buy or sell")
 	channel := fs.String("channel", "", "channel ID or member ID; default a DM with the first of SLACK_ORDER_USERS")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if !slices.Contains(futButtonStrategies, *strat) {
 		return fmt.Errorf("%s has no buttons", *strat)
+	}
+	side := market.Buy
+	switch strings.ToLower(*sideFlag) {
+	case "buy":
+	case "sell":
+		side = market.Sell
+	default:
+		return fmt.Errorf("--side %q: buy or sell", *sideFlag)
 	}
 	if err := auth.LoadDotEnv(".env"); err != nil {
 		return err
@@ -179,12 +201,12 @@ func runFutButtonsTest(ctx context.Context, args []string) error {
 		return err
 	}
 	now := time.Now()
-	s := fwdSignal{Strategy: *strat, Time: now, Side: market.Buy, Instrument: mcxForwardUnderlying(*strat) + " FUT", Note: "TEST, not a signal"}
+	s := fwdSignal{Strategy: *strat, Time: now, Side: side, Instrument: mcxForwardUnderlying(*strat) + " FUT", Note: "enter"}
 	row := newFutContracts(true).row(ctx, s, now)
 	if row == nil {
 		return errors.New("no futures from Kite for the buttons")
 	}
-	text := fmt.Sprintf(":test_tube: *TEST* %s buttons · %s", *strat, now.In(market.IST).Format("2006-01-02 15:04"))
+	text := fmt.Sprintf(":test_tube: *TEST, not a signal* %s %s button · %s · pressing it places a REAL order", *strat, strings.ToUpper(*sideFlag), now.In(market.IST).Format("2006-01-02 15:04"))
 	if _, err := sc.PostBlocks(ctx, ch, text, []slack.Block{slack.SectionBlock(text), row}); err != nil {
 		return err
 	}

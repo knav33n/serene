@@ -106,24 +106,19 @@ func TestSlackActions(t *testing.T) {
 }
 
 func TestFutButtons(t *testing.T) {
-	b := FutButtons("silverm_hma_1h", []string{"SILVERM26FEBFUT", "SILVERM26APRFUT"}, []string{"2027-02-26", "2027-04-30"})
-	els := b["elements"].([]map[string]any)
-	if len(els) != 4 || els[1]["style"] != "primary" || els[2]["style"] != "danger" {
-		t.Fatalf("%+v", els)
-	}
-	want := []FutOrder{
-		{"silverm_hma_1h", market.Buy, "SILVERM26FEBFUT"}, {"silverm_hma_1h", market.Buy, "SILVERM26APRFUT"},
-		{"silverm_hma_1h", market.Sell, "SILVERM26FEBFUT"}, {"silverm_hma_1h", market.Sell, "SILVERM26APRFUT"},
-	}
-	ids := map[string]bool{}
-	for i, el := range els {
-		o, err := ParseFutOrder(el["value"].(string))
-		if err != nil || o != want[i] {
-			t.Fatalf("button %d: %+v %v", i, o, err)
+	for _, side := range []market.Side{market.Buy, market.Sell} {
+		b := FutButtons("silverm_hma_1h", side, "SILVERM27FEBFUT", "26/02/2027")
+		els := b["elements"].([]map[string]any)
+		if len(els) != 1 {
+			t.Fatalf("%s: %d buttons, want 1: %+v", side, len(els), els)
 		}
-		ids[el["action_id"].(string)] = true
-	}
-	if len(ids) != 4 {
-		t.Fatalf("action ids not unique: %v", ids)
+		style := map[market.Side]string{market.Buy: "primary", market.Sell: "danger"}[side]
+		if els[0]["style"] != style {
+			t.Fatalf("%s: style %v", side, els[0]["style"])
+		}
+		o, err := ParseFutOrder(els[0]["value"].(string))
+		if err != nil || o != (FutOrder{"silverm_hma_1h", side, "SILVERM27FEBFUT"}) {
+			t.Fatalf("%s: %+v %v", side, o, err)
+		}
 	}
 }
