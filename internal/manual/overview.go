@@ -2,6 +2,7 @@ package manual
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"strings"
@@ -60,6 +61,11 @@ type View struct {
 	Free      map[string]Free `json:"free"`
 	Positions map[string]Held `json:"positions"`
 	Trades    Day             `json:"trades"`
+	// TradingDay is false on weekends and NSE holidays: the page shows only the card.
+	TradingDay bool `json:"trading_day"`
+	// Traded says today's one manual trade has been taken: the page hides the form.
+	Traded bool  `json:"traded"`
+	Card   Tally `json:"card"`
 }
 
 // strategy names an order by its tag.
@@ -79,6 +85,7 @@ type book struct {
 	rows   []DayRow
 	total  *Total
 	errMsg string
+	manual *DayNet // the desk's trades today, if it made any
 }
 
 func (d *Desk) read(ctx context.Context, name string) book {
@@ -189,6 +196,21 @@ func (d *Desk) read(ctx context.Context, name string) book {
 		}
 		total.PnL += r.PnL
 		bk.rows = append(bk.rows, *r)
+		if r.Manual {
+			if bk.manual == nil {
+				bk.manual = &DayNet{Source: "desk"}
+			}
+			bk.manual.PnL += r.PnL
+			if r.Charges != nil {
+				bk.manual.Charges += *r.Charges
+			} else {
+				bk.manual.Note = "charges not all known"
+			}
+		}
+	}
+	if m := bk.manual; m != nil {
+		m.PnL, m.Charges = round2(m.PnL), round2(m.Charges)
+		m.Net = round2(m.PnL - m.Charges)
 	}
 	total.PnL = round2(total.PnL)
 	if fills != nil {
@@ -244,7 +266,67 @@ func (d *Desk) Overview(ctx context.Context) (View, error) {
 		return t
 	}
 	sort.SliceStable(v.Trades.Rows, func(i, j int) bool { return latest(v.Trades.Rows[i]) > latest(v.Trades.Rows[j]) })
+	now := d.now()
+	today := market.DateOf(now)
+	v.TradingDay = market.NSETradingDay(today)
+	live := map[string]float64{}
+	for i, name := range Brokers {
+		if m := books[i].manual; m != nil {
+			live[name] = m.Net
+			v.Traded = true
+		}
+	}
+	if d.Ledger != nil {
+		v.Traded = v.Traded || d.Ledger.TradedOn(today)
+		if v.TradingDay && !before(now, RecordAt) {
+			d.record(today, books)
+		}
+		v.Card = d.Ledger.Tally(today, live)
+	}
 	return v, nil
+}
+
+// RecordAt is when a day's manual nets are final: after the 15:20 square-off.
+var RecordAt = [2]int{15, 31}
+
+// record puts each broker's manual net for day in the ledger.
+func (d *Desk) record(day market.Date, books []book) {
+	for i, name := range Brokers {
+		if m := books[i].manual; m != nil && books[i].errMsg == "" {
+			_ = d.Ledger.Put(day, name, *m)
+		}
+	}
+}
+
+// RecordDay reads every broker and records today's manual nets, after
+// RecordAt on a trading day. It fails if a broker can't be read, so the
+// caller tries again.
+func (d *Desk) RecordDay(ctx context.Context) error {
+	if d.Ledger == nil {
+		return nil
+	}
+	books := make([]book, len(Brokers))
+	var wg sync.WaitGroup
+	for i, name := range Brokers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			books[i] = d.read(ctx, name)
+		}()
+	}
+	wg.Wait()
+	var errs []string
+	for i, name := range Brokers {
+		// A broker that isn't logged in and made no trade (Fyers, ICICI) doesn't block the day.
+		if books[i].errMsg != "" && (name == "zerodha" || name == "upstox") {
+			errs = append(errs, Names[name]+": "+books[i].errMsg)
+		}
+	}
+	d.record(market.DateOf(d.now()), books)
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // ByOrder sums a tradebook's fills into one row per order: the quantities

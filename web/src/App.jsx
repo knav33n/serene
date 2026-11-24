@@ -72,7 +72,7 @@ export default function App() {
             <a href="#" aria-current={metals ? undefined : "page"}>NIFTY</a>
             <a href="#metals" aria-current={metals ? "page" : undefined}>Gold &amp; Silver</a>
           </nav></div>
-        {!metals && <div className="daynet">
+        {!metals && man.data?.trading_day !== false && <div className="daynet">
           <span className="k">Day net</span>
           <span className={"v " + (net > 0 ? "up" : net < 0 ? "down" : "")}>{net == null ? "–" : rupees(net)}</span>
         </div>}

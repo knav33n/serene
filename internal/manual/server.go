@@ -225,8 +225,8 @@ func (s *Server) Run(ctx context.Context) error {
 	defer tick.Stop()
 	watch := time.NewTicker(2 * time.Second)
 	defer watch.Stop()
-	var watchErr string
-	var squared market.Date
+	var watchErr, recordErr string
+	var squared, recorded market.Date
 	for {
 		select {
 		case <-ctx.Done():
@@ -248,6 +248,16 @@ func (s *Server) Run(ctx context.Context) error {
 		case <-tick.C:
 			now := s.Desk.now()
 			d := market.DateOf(now)
+			if recorded != d && market.NSETradingDay(d) && !before(now, RecordAt) {
+				if err := s.Desk.RecordDay(ctx); err != nil {
+					if err.Error() != recordErr {
+						s.logf("recording the day: %v", err)
+					}
+					recordErr = err.Error()
+				} else {
+					recorded, recordErr = d, ""
+				}
+			}
 			if squared == d || !market.NSETradingDay(d) || before(now, CloseAt) || !before(now, [2]int{15, 30}) {
 				continue
 			}

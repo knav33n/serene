@@ -152,6 +152,7 @@ type Desk struct {
 	LimitWait time.Duration // how long a buy's LIMIT waits before what's left is cancelled
 	Targets   *Targets      // the targets the desk watches (Watch), placing a LIMIT sell at each once reached
 	Poll      time.Duration
+	Ledger    *Ledger // each day's manual nets and its one trade; nil: no limit, no card
 
 	mu sync.Mutex // one order action at a time
 }
@@ -383,6 +384,10 @@ func (d *Desk) Buy(ctx context.Context, r BuyReq) (BuyResult, error) {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	today := market.DateOf(now)
+	if d.Ledger != nil && d.Ledger.TradedOn(today) {
+		return BuyResult{}, errors.New("today's one manual trade has already been taken")
+	}
 	type res struct {
 		b    []Bought
 		warn string
@@ -411,6 +416,11 @@ func (d *Desk) Buy(ctx context.Context, r BuyReq) (BuyResult, error) {
 	}
 	if len(result.Trades) == 0 {
 		return BuyResult{}, errors.New(strings.Join(result.Errors, "; "))
+	}
+	if d.Ledger != nil {
+		if err := d.Ledger.MarkTraded(today, d.now().Format("15:04:05")); err != nil {
+			result.Warnings = append(result.Warnings, "the day's trade wasn't recorded: "+err.Error())
+		}
 	}
 	return result, nil
 }

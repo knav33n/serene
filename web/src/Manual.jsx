@@ -9,8 +9,27 @@ export const BROKERS = { zerodha: "Zerodha", upstox: "Upstox", fyers: "Fyers", i
 export const rupees = v => v == null ? "–" : (v < 0 ? "−₹" : "₹") + Math.abs(Math.round(v)).toLocaleString("en-IN");
 const px = v => v == null ? "–" : Number(v).toFixed(2);
 const sign = v => v == null || v === 0 ? "" : v > 0 ? "up" : "down";
-const Money = ({ v, strong }) => <span className={"money " + sign(v)}>{strong ? <b>{rupees(v)}</b> : rupees(v)}</span>;
+export const Money = ({ v, strong }) => <span className={"money " + sign(v)}>{strong ? <b>{rupees(v)}</b> : rupees(v)}</span>;
 const Tag = ({ broker }) => <span className={"btag " + broker}>{BROKERS[broker]}</span>;
+
+const dayName = d => new Date(d + "T00:00:00+05:30").toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
+
+// The running total of the desk's trades since the ledger's first day (25 Nov 2026), as the desk recorded
+// each day after the close, plus today's so far: each broker that traded, and their sum.
+export function Earned({ card }) {
+  if (!card) return null;
+  const brokers = Object.keys(BROKERS).filter(b => card.brokers?.[b] != null);
+  return <section className="earned" aria-label="Made since">
+    <div className="ehead">
+      <span className="k">Made since {dayName(card.since)}</span>
+      {card.days > 0 && <span className="days">{card.days} trading {card.days === 1 ? "day" : "days"}</span>}
+    </div>
+    <div className="etotal"><Money v={card.net || 0} strong /></div>
+    {brokers.length > 0 && <div className="ebrokers">
+      {brokers.map(b => <div className="eb" key={b}><Tag broker={b} /><Money v={card.brokers[b]} /></div>)}
+    </div>}
+  </section>;
+}
 
 export default function Manual({ man, asking, load }) {
   const say = useSay();
@@ -53,8 +72,13 @@ export default function Manual({ man, asking, load }) {
   const day = man?.trades || {};
   const strike = form.strike.trim();
 
+  // A weekend or NSE holiday: the card alone
+  if (man && man.trading_day === false) return <Earned card={man.card} />;
+
   return <>
-    <section className={"ticket " + form.side.toLowerCase()}>
+    <Earned card={man?.card} />
+    {man?.traded ? <section className="taken" role="status">Today's trade is taken. The next one opens on the next trading day.</section>
+    : <section className={"ticket " + form.side.toLowerCase()}>
       <div className="sides" role="radiogroup" aria-label="Side">
         {[["CE", "Call"], ["PE", "Put"]].map(([s, word]) => <label key={s} className={"sidebtn " + s.toLowerCase()}>
           <input type="radio" name="man-side" value={s} checked={form.side === s} onChange={() => set("side", s)} />
@@ -86,7 +110,7 @@ export default function Manual({ man, asking, load }) {
         <Button className={"b buy " + form.side.toLowerCase()} onClick={buy} aria-label="Buy">
           Buy <span className="what">{strike ? `${strike} ${form.side}` : form.side}</span></Button>
       </div>
-    </section>
+    </section>}
 
     <section className="block">
       <div className="bhead"><h2>Positions</h2><span className="count">{positions.length}</span>

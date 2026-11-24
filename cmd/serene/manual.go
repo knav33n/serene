@@ -182,6 +182,7 @@ func runManual(ctx context.Context, args []string) error {
 	useSlack := fs.Bool("slack", false, "post buys and square-offs to SLACK_CHANNEL")
 	dryRun := fs.Bool("slack-dry-run", false, "Slack's futures buttons check the order on Kite and reply, but place nothing")
 	targetsPath := fs.String("targets", "data/manual/targets.json", "the targets being watched, kept across restarts")
+	ledgerPath := fs.String("ledger", "data/manual/ledger.json", "each day's manual nets by broker (the page's card) and its one trade")
 	wait := fs.Duration("limit-wait", 60*time.Second, "how long a LIMIT buy waits before what's left is cancelled")
 	liveDir := fs.String("live-dir", "data/live", "the live MCX strategies' state, for the Gold & Silver page")
 	mcxReport := fs.String("mcx-report", "reports/live_mcx.csv", "the live MCX strategies' closed trades, for the Gold & Silver page")
@@ -203,6 +204,10 @@ func runManual(ctx context.Context, args []string) error {
 				fmt.Fprintln(os.Stderr, "slack:", err)
 			}
 		}
+	}
+	ledger, err := manual.OpenLedger(*ledgerPath)
+	if err != nil {
+		return err
 	}
 	cl := &clients{at: map[string]time.Time{}}
 	cs := &contracts{}
@@ -253,6 +258,7 @@ func runManual(ctx context.Context, args []string) error {
 		Notify:    notify,
 		LimitWait: *wait,
 		Targets:   &manual.Targets{Path: *targetsPath},
+		Ledger:    ledger,
 	}
 	logf := func(format string, a ...any) {
 		fmt.Printf("%s "+format+"\n", append([]any{time.Now().In(market.IST).Format("15:04:05")}, a...)...)
