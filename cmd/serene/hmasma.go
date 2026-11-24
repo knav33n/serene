@@ -19,6 +19,7 @@ const (
 	hsFrame = 10 * time.Minute
 	hsFast  = 34 // HMA of closes
 	hsSlow  = 89 // SMA of closes
+	hsLead  = 10 // days replayed before hsForward
 )
 
 var hsForward = market.Date{Year: 2026, Month: time.November, Day: 24}

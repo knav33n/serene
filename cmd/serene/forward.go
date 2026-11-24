@@ -364,13 +364,19 @@ func mcxSignals(ctx context.Context, dir, costsFile, strat string) ([]fwdSignal,
 		return nil, err
 	}
 	var out []fwdSignal
+	var from time.Time // the hmasma replays start before go-live; nothing before it is posted
+	if hsStrategies[strat] != "" {
+		from = hsForward.At(0, 0)
+	}
 	for _, t := range ts {
 		name := t.Key
 		if in, err := market.ParseKey(t.Key); err == nil {
 			name = fmt.Sprintf("%s FUT (exp %s)", in.Underlying, in.Expiry)
 		}
-		out = append(out, fwdSignal{Strategy: strat, Time: t.Entry, Side: t.Side, Instrument: name, Price: t.In, Note: "enter"})
-		if t.Reason != "end" {
+		if !t.Entry.Before(from) {
+			out = append(out, fwdSignal{Strategy: strat, Time: t.Entry, Side: t.Side, Instrument: name, Price: t.In, Note: "enter"})
+		}
+		if t.Reason != "end" && !t.Exit.Before(from) {
 			out = append(out, fwdSignal{Strategy: strat, Time: t.Exit, Side: -t.Side, Instrument: name, Price: t.Out, Note: "exit, " + t.Reason})
 		}
 	}
@@ -383,7 +389,7 @@ func mcxTrades(ctx context.Context, dir, costsFile, strat string) ([]mcx.Trade, 
 	name, start := gemName, gemForward
 	hs := hsStrategies[strat] != ""
 	if hs {
-		name, start = hsStrategies[strat], hsForward
+		name, start = hsStrategies[strat], hsForward.AddDays(-hsLead)
 	}
 	if strat == "goldm_hma_1h" {
 		start = ghmForward
@@ -420,7 +426,9 @@ func mcxTrades(ctx context.Context, dir, costsFile, strat string) ([]mcx.Trade, 
 		Slip: 1, Costs: costs, From: gemForward, To: to}
 	switch {
 	case hs:
-		frame, cfg = hsFrame, hsConfig(name, spec, costs, 1, hsForward, to)
+		// From well before go-live, so the side held at go-live comes from a
+		// real cross rather than an entry at the first bar replayed.
+		frame, cfg = hsFrame, hsConfig(name, spec, costs, 1, start, to)
 	case strat == "goldm_hma_1h":
 		frame, cfg = ghmFrame, ghmConfig(spec, costs, 1, ghmForward, to)
 	case name == smName:
