@@ -1,0 +1,15 @@
+[Unit]
+Description=serene goldm/silverm_emasma_30m: silent forward test, Slack once at 100 trades each
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=serene
+Group=serene
+WorkingDirectory=/home/serene/app
+# Fetches GOLDM/SILVERM minute bars from Kite and replays the frozen rule. Posts
+# nothing (no signals, progress or failures) until both have 100 closed trades,
+# then the verdict once. Status is in the journal: journalctl -u serene-emasma.
+ExecStart=/home/serene/app/serene forward emasma --fetch --slack
+TimeoutStartSec=10min

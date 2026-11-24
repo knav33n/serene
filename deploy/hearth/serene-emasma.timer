@@ -1,0 +1,12 @@
+[Unit]
+Description=serene goldm/silverm_emasma_30m, every 30 minutes of the MCX session
+
+[Timer]
+# 2 minutes after each 30m frame closes. Nothing is time-critical: no one sees
+# a signal, and each run replays from the start, so missed runs cost nothing as
+# long as bars are fetched before a contract expires.
+OnCalendar=Mon..Fri *-*-* 09..23:02,32:00 Asia/Kolkata
+Persistent=false
+
+[Install]
+WantedBy=timers.target
