@@ -274,6 +274,8 @@ func run(ctx context.Context, args []string) error {
 		return runMCXFetch(ctx, rest)
 	case "etf fetch":
 		return runETFFetch(ctx, rest)
+	case "fyers mcx":
+		return runFyersMCX(ctx, rest)
 	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot", "fyers lots", "fyers all":
 		return runFyers(ctx, args[1], rest)
 	case "forward signals":
