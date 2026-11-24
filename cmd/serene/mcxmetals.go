@@ -50,6 +50,7 @@ type metalsResult struct {
 	h1, h2, long, shrt float64
 	pct                float64 // net as a percent of one lot's average notional
 	both               bool
+	mtmDD, uwDays      float64 // with mcxma10 --csv: mark-to-market max DD, longest days under water
 }
 
 // metalsRun is one metal's prepared data and window.

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -53,6 +54,8 @@ func runMCXMA10(ctx context.Context, args []string) error {
 	costsFile := fs.String("costs", "configs/costs_mcx.yaml", "charges schedule")
 	slipTicks := fs.Int64("slip-ticks", 1, "ticks against every fill")
 	detail := fs.String("detail", "", "only print the long/short breakdown of this variant, e.g. \"HMA/SMA 34/89 L+S\"")
+	ddWindows := fs.String("dd", "", "with --detail: drawdown windows, e.g. 2019-01-01..2023-12-31,2024-01-01..2026-10-31")
+	csvOut := fs.String("csv", "", "also write every variant's row per metal to this CSV")
 	unseal := fs.Bool("unseal", false, "with --detail: run into the held-back data, once, for a pre-picked variant (recorded)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -136,9 +139,28 @@ func runMCXMA10(ctx context.Context, args []string) error {
 		runs = append(runs, r)
 	}
 
+	// hold is buy and hold through the same rolls: the fast line is always
+	// above the slow one.
+	hold := func(r *metalsRun, slip int64) mcx.EMAConfig {
+		const1 := func(v float64) func([]market.Bar, int) []float64 {
+			return func(b []market.Bar, _ int) []float64 {
+				out := make([]float64, len(b))
+				for i := range out {
+					out[i] = v
+				}
+				return out
+			}
+		}
+		return mcx.EMAConfig{Name: r.name, Spec: r.spec, Frame: frame, Fast: 1, Slow: 1, LongOnly: true,
+			MA: const1(1), SlowMA: const1(0), Slip: slip, Costs: costs, From: r.from, To: r.to}
+	}
+	var evalCfg func(r *metalsRun, c mcx.EMAConfig) (metalsResult, error)
 	eval := func(r *metalsRun, s ma10Signal, slip int64) (metalsResult, error) {
 		c := mcx.EMAConfig{Name: r.name, Spec: r.spec, Frame: frame, Fast: s.fast, Slow: s.slow, LongOnly: s.longOnly,
 			MA: ma10Kinds[s.fastK].fn, SlowMA: ma10Kinds[s.slowK].fn, Slip: slip, Costs: costs, From: r.from, To: r.to}
+		return evalCfg(r, c)
+	}
+	evalCfg = func(r *metalsRun, c mcx.EMAConfig) (metalsResult, error) {
 		ts, err := mcx.EMABacktest(r.ed, c)
 		if err != nil {
 			return metalsResult{}, err
@@ -167,6 +189,10 @@ func runMCXMA10(ctx context.Context, args []string) error {
 			m.pct = m.net / r.notional * 100
 		}
 		m.both = m.h1 > 0 && m.h2 > 0
+		if *csvOut != "" {
+			mtm, _ := drawdown(r.minute, ts, float64(r.spec.Multiplier))
+			m.mtmDD, m.uwDays = mtm.depth, mtm.longest.Hours()/24
+		}
 		return m, nil
 	}
 
@@ -176,6 +202,13 @@ func runMCXMA10(ctx context.Context, args []string) error {
 				continue
 			}
 			fmt.Printf("%s, %s frames, %d tick slippage + charges\n", s, frameText(frame), *slipTicks)
+			for _, r := range runs {
+				bh, err := evalCfg(r, hold(r, *slipTicks))
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%s %s..%s buy & hold (rolled): ₹%.0f in %d rolls, %.1f%% of notional\n", r.name, r.from, r.to, bh.net, bh.n, bh.pct)
+			}
 			fmt.Printf("%-8s %-5s %6s %5s %6s %11s %11s %11s\n", "metal", "side", "trades", "won", "win%", "net ₹", "avg win ₹", "avg loss ₹")
 			for _, r := range runs {
 				c := mcx.EMAConfig{Name: r.name, Spec: r.spec, Frame: frame, Fast: s.fast, Slow: s.slow, LongOnly: s.longOnly,
@@ -204,6 +237,37 @@ func runMCXMA10(ctx context.Context, args []string) error {
 					name := map[market.Side]string{market.Buy: "long", market.Sell: "short", 0: "all"}[side]
 					fmt.Printf("%-8s %-5s %6d %5d %5.0f%% %11.0f %11.0f %11.0f\n", r.name, name, n, won,
 						100*float64(won)/float64(max(n, 1)), net, gw/float64(max(won, 1)), gl/float64(max(n-won, 1)))
+				}
+				yn, yt := map[int]float64{}, map[int]int{}
+				var years []int
+				for _, tr := range ts {
+					y := tr.Entry.In(market.IST).Year()
+					if _, ok := yt[y]; !ok {
+						years = append(years, y)
+					}
+					yn[y] += tr.Net.Rupees()
+					yt[y]++
+				}
+				fmt.Printf("  by year:")
+				for _, y := range years {
+					fmt.Printf("  %d %.0f (%d)", y, yn[y], yt[y])
+				}
+				fmt.Println()
+				if *ddWindows != "" {
+					var ws [][2]market.Date
+					for _, w := range strings.Split(*ddWindows, ",") {
+						a, b, _ := strings.Cut(w, "..")
+						da, err := market.ParseDate(a)
+						if err != nil {
+							return err
+						}
+						db, err := market.ParseDate(b)
+						if err != nil {
+							return err
+						}
+						ws = append(ws, [2]market.Date{da, db})
+					}
+					printDrawdowns(r.minute, ts, float64(r.spec.Multiplier), ws)
 				}
 				gapReport(r, ts)
 				if sealed {
@@ -246,6 +310,19 @@ func runMCXMA10(ctx context.Context, args []string) error {
 	}
 	if err := analytics.AppendTrials(analytics.LedgerPath(*dir), ledger); err != nil {
 		return fmt.Errorf("trial ledger: %w", err)
+	}
+	if *csvOut != "" {
+		var b strings.Builder
+		b.WriteString("metal,variant,trades,win,pf,net,pct,h1,h2,long,short,dd,mtm_dd,uw_days\n")
+		for _, r := range runs {
+			for i, m := range grid[r.name] {
+				fmt.Fprintf(&b, "%s,%s,%d,%.3f,%.3f,%.0f,%.2f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n", r.name, signals[i], m.n, m.win, m.pf,
+					m.net, m.pct, m.h1, m.h2, m.long, m.shrt, m.dd, m.mtmDD, m.uwDays)
+			}
+		}
+		if err := os.WriteFile(*csvOut, []byte(b.String()), 0o644); err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("SMA/EMA/HMA crossovers on %s frames, every fast×slow average pairing, MCX futures (active contract), 1 lot, %d tick slippage + charges\n",
@@ -297,6 +374,11 @@ func runMCXMA10(ctx context.Context, args []string) error {
 		}
 		fmt.Printf("\n== %s: %d of %d positive, %d positive in both halves; top 15\n", r.name, pos, len(res), both)
 		resHead("variant")
+		bh, err := evalCfg(r, hold(r, *slipTicks))
+		if err != nil {
+			return err
+		}
+		resLine("buy & hold (rolled)", bh)
 		for _, i := range idx[:15] {
 			resLine(signals[i].String(), res[i])
 		}
