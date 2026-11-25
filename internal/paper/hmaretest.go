@@ -21,6 +21,7 @@ const HMARetestName = "nifty_hma_retest"
 type Leg struct {
 	Instrument market.Instrument
 	Bars       []market.Bar
+	Ones       []market.Bar // minute bars, for HMANears; optional
 }
 
 // Config sets nifty_hma_retest's rules. The zero value is not usable; see

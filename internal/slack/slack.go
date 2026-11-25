@@ -134,6 +134,11 @@ func (c *Client) Reply(ctx context.Context, channel, ts, text string) error {
 	return c.call(ctx, "chat.postMessage", map[string]string{"channel": channel, "thread_ts": ts, "text": text}, nil)
 }
 
+// ReplyBlocks posts a Block Kit message in the thread under the message ts.
+func (c *Client) ReplyBlocks(ctx context.Context, channel, ts, text string, blocks []Block) error {
+	return c.call(ctx, "chat.postMessage", map[string]any{"channel": channel, "thread_ts": ts, "text": text, "blocks": blocks}, nil)
+}
+
 // maxAlt is Slack's limit on alt text.
 const maxAlt = 1000
 

@@ -88,7 +88,7 @@ func TestFillsOnRetestOfTheSlowHMA(t *testing.T) {
 	if i < 0 || i >= len(bs)-2 {
 		t.Fatalf("cross at %d", i)
 	}
-	tr := run(t, anyTime(day), Leg{ce, bs})
+	tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: bs})
 	if tr == nil {
 		t.Fatal("no trade")
 	}
@@ -111,7 +111,7 @@ func TestFillsOnRetestOfTheSlowHMA(t *testing.T) {
 
 func TestGapThroughTheLimitFillsAtTheOpen(t *testing.T) {
 	bs := legBars(append(rally(), bar{99, 98, 99}))
-	tr := run(t, anyTime(day), Leg{ce, bs})
+	tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: bs})
 	if tr == nil || tr.Entry != market.Rupees(99) {
 		t.Fatalf("trade %+v", tr)
 	}
@@ -119,7 +119,7 @@ func TestGapThroughTheLimitFillsAtTheOpen(t *testing.T) {
 
 func TestNoFillWithoutARetest(t *testing.T) {
 	bs := legBars(append(rally(), bar{115, 114, 116}, bar{116, 115, 117}))
-	if tr := run(t, anyTime(day), Leg{ce, bs}); tr != nil {
+	if tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: bs}); tr != nil {
 		t.Fatalf("trade %+v", tr)
 	}
 }
@@ -127,7 +127,7 @@ func TestNoFillWithoutARetest(t *testing.T) {
 func TestNoSwingLowBelowSkipsTheArm(t *testing.T) {
 	// Straight up from the open: no swing low today.
 	today := []bar{{100, 99, 104}, {104, 103, 108}, {108, 107, 112}, {112, 111, 114}, {114, 101, 102}}
-	if tr := run(t, anyTime(day), Leg{ce, legBars(today)}); tr != nil {
+	if tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: legBars(today)}); tr != nil {
 		t.Fatalf("trade %+v", tr)
 	}
 }
@@ -136,7 +136,7 @@ func TestStopAndTrail(t *testing.T) {
 	// Fill, then a higher swing low of 100 at the 3rd bar after, then a fall.
 	after := []bar{{102, 101, 106}, {106, 100.5, 103}, {103, 100, 104}, {104, 102, 108}, {108, 106, 109}, {109, 99, 99.5}}
 	bs := legBars(append(append(rally(), bar{114, 101, 102}), after...))
-	tr := run(t, anyTime(day), Leg{ce, bs})
+	tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: bs})
 	if tr == nil || tr.Open {
 		t.Fatalf("trade %+v", tr)
 	}
@@ -152,7 +152,7 @@ func TestStopGapFillsAtTheOpenAndNotOnTheFillBar(t *testing.T) {
 	// The fill bar's own low is under the stop: no exit on it. The next bar
 	// opens under the stop.
 	bs := legBars(append(rally(), bar{114, 94, 102}, bar{90, 89, 90}))
-	tr := run(t, anyTime(day), Leg{ce, bs})
+	tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: bs})
 	if tr == nil || tr.Open || tr.Reason != "stop" || tr.Exit != market.Rupees(90) {
 		t.Fatalf("trade %+v", tr)
 	}
@@ -162,7 +162,7 @@ func TestTimeExit(t *testing.T) {
 	bs := legBars(append(rally(), bar{114, 101, 102}))
 	pad := mk(day, 9, 15+len(bs)-40, flat(130, 400))
 	bs = append(bs, pad...)
-	tr := run(t, anyTime(day), Leg{ce, bs})
+	tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: bs})
 	if tr == nil || tr.Open || tr.Reason != "15:15" || tr.Exit != market.Rupees(130) ||
 		!tr.ExitTime.Equal(day.At(15, 15)) {
 		t.Fatalf("trade %+v", tr)
@@ -172,7 +172,7 @@ func TestTimeExit(t *testing.T) {
 func TestFirstLegToFillIsTheTrade(t *testing.T) {
 	early := legBars(append(rally(), bar{114, 101, 102}))
 	late := legBars(append(rally(), bar{115, 114, 116}, bar{114, 101, 102}))
-	tr := run(t, anyTime(day), Leg{ce, late}, Leg{pe, early})
+	tr := run(t, anyTime(day), Leg{Instrument: ce, Bars: late}, Leg{Instrument: pe, Bars: early})
 	if tr == nil || tr.Instrument.Right != market.Put {
 		t.Fatalf("trade %+v", tr)
 	}
@@ -182,7 +182,7 @@ func TestNoEntryFromThreePM(t *testing.T) {
 	cfg := anyTime(day)
 	cfg.LastEntry = 10 * time.Minute // 09:25, the bar after the rally ends
 	bs := legBars(append(rally(), bar{114, 101, 102}))
-	if tr := run(t, cfg, Leg{ce, bs}); tr != nil {
+	if tr := run(t, cfg, Leg{Instrument: ce, Bars: bs}); tr != nil {
 		t.Fatalf("trade %+v", tr)
 	}
 }
@@ -190,17 +190,17 @@ func TestNoEntryFromThreePM(t *testing.T) {
 func TestTooLittleCapitalSkips(t *testing.T) {
 	cfg := anyTime(day)
 	cfg.Capital = market.Rupees(1000)
-	if tr := run(t, cfg, Leg{ce, legBars(append(rally(), bar{114, 101, 102}))}); tr != nil {
+	if tr := run(t, cfg, Leg{Instrument: ce, Bars: legBars(append(rally(), bar{114, 101, 102}))}); tr != nil {
 		t.Fatalf("trade %+v", tr)
 	}
 }
 
 func TestCrossBefore0930IsIgnored(t *testing.T) {
 	bs := legBars(append(rally(), bar{114, 101, 102}, bar{102, 101, 103}))
-	if tr := run(t, DefaultHMARetest(day), Leg{ce, bs}); tr != nil {
+	if tr := run(t, DefaultHMARetest(day), Leg{Instrument: ce, Bars: bs}); tr != nil {
 		t.Fatalf("traded a 09:2x cross: %+v", tr)
 	}
-	if a := Arms([]Leg{{ce, bs[:len(bs)-2]}}, DefaultHMARetest(day)); len(a) != 0 {
+	if a := Arms([]Leg{{Instrument: ce, Bars: bs[:len(bs)-2]}}, DefaultHMARetest(day)); len(a) != 0 {
 		t.Fatalf("armed: %+v", a)
 	}
 }
@@ -208,14 +208,14 @@ func TestCrossBefore0930IsIgnored(t *testing.T) {
 func TestCrossFrom0930Trades(t *testing.T) {
 	today := append(flat(100, 15), append(rally(), bar{114, 101, 102}, bar{102, 101, 103})...)
 	bs := legBars(today)
-	tr := run(t, DefaultHMARetest(day), Leg{ce, bs})
+	tr := run(t, DefaultHMARetest(day), Leg{Instrument: ce, Bars: bs})
 	if tr == nil {
 		t.Fatal("no trade")
 	}
 	if tr.Armed.Before(day.At(9, 29)) || tr.EntryTime.Before(day.At(9, 30)) {
 		t.Fatalf("armed %s entry %s", tr.Armed, tr.EntryTime)
 	}
-	if a := Arms([]Leg{{ce, bs[:len(bs)-2]}}, DefaultHMARetest(day)); len(a) != 1 {
+	if a := Arms([]Leg{{Instrument: ce, Bars: bs[:len(bs)-2]}}, DefaultHMARetest(day)); len(a) != 1 {
 		t.Fatalf("arms %+v", a)
 	}
 }

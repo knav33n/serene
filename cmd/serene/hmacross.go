@@ -30,7 +30,8 @@ func runHMACross(ctx context.Context, args []string) error {
 	useSlack := fs.Bool("slack", false, "post new crosses to SLACK_PAPER_CHANNEL")
 	date := fs.String("date", "", "day to replay (default today, IST)")
 	dir := fs.String("dir", "data/paper", "per-day contract choices")
-	sentPath := fs.String("sent", "data/hmacross_sent.json", "crosses already posted")
+	sentPath := fs.String("sent", "data/hmacross_sent.json", "crosses and near-HMA alerts already posted")
+	tsPath := fs.String("ts", "data/hmacross_ts.json", "Slack ts of each posted cross, for near-HMA thread replies")
 	alertPath := fs.String("alert", "data/hmacross_alert.json", "whether a failure has been posted")
 	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
 	warm := fs.Int("warm", 4, "prior trading days of bars to warm the averages")
@@ -65,13 +66,13 @@ func runHMACross(ctx context.Context, args []string) error {
 	if *exit && client == nil {
 		return errors.New("--exit needs --slack")
 	}
-	err = hmaCross(ctx, client, channel, d, now, *dir, *sentPath, *step, *warm, *exit)
+	err = hmaCross(ctx, client, channel, d, now, *dir, *sentPath, *tsPath, *step, *warm, *exit)
 	alertOnce(ctx, client, channel, *alertPath, "serene paper "+paper.HMACrossName, err)
 	return err
 }
 
 func hmaCross(ctx context.Context, client *slack.Client, channel string, d market.Date, now time.Time,
-	dir, sentPath string, step float64, warm int, exit bool) error {
+	dir, sentPath, tsPath string, step float64, warm int, exit bool) error {
 	kc, err := kiteClient(ctx)
 	if err != nil {
 		return err
@@ -95,11 +96,11 @@ func hmaCross(ctx context.Context, client *slack.Client, channel string, d marke
 		if err != nil {
 			return fmt.Errorf("%s candles: %w", l.Symbol, err)
 		}
-		bars, err := hmaCrossBars(inst, cs, d, now, cfg.TF)
+		bars, ones, err := hmaCrossBars(inst, cs, d, now, cfg.TF)
 		if err != nil {
 			return fmt.Errorf("%s: %w", l.Symbol, err)
 		}
-		legs = append(legs, paper.Leg{Instrument: inst, Bars: bars})
+		legs = append(legs, paper.Leg{Instrument: inst, Bars: bars, Ones: ones})
 	}
 	crosses := paper.HMACrosses(legs, cfg)
 	if len(crosses) == 0 {
@@ -113,13 +114,16 @@ func hmaCross(ctx context.Context, client *slack.Client, channel string, d marke
 			return hmaCrossExit(ctx, kc, symbol, time.Now())
 		}
 	}
-	return postHMACrosses(ctx, client, channel, st, cfg, crosses, now, sentPath, exitFn)
+	if err := postHMACrosses(ctx, client, channel, st, cfg, crosses, now, sentPath, tsPath, exitFn); err != nil {
+		return err
+	}
+	return postHMANears(ctx, client, channel, st, cfg, paper.HMANears(legs, crosses, cfg), now, sentPath, tsPath)
 }
 
 // hmaCrossBars is Kite's minute candles, whole minutes in the session up to
-// d only, resampled to tf, without the tf bar still forming at now.
-func hmaCrossBars(inst market.Instrument, cs []kite.Candle, d market.Date, now time.Time, tf market.Timeframe) ([]market.Bar, error) {
-	var ones []market.Bar
+// d only, resampled to tf, without the tf bar still forming at now; and the
+// whole minutes themselves.
+func hmaCrossBars(inst market.Instrument, cs []kite.Candle, d market.Date, now time.Time, tf market.Timeframe) (bars, ones []market.Bar, err error) {
 	for _, c := range cs {
 		t := c.Time.In(market.IST)
 		b := market.Bar{Key: inst.Key(), Timeframe: market.Minute1, Time: t, End: t.Add(time.Minute),
@@ -131,30 +135,29 @@ func hmaCrossBars(inst market.Instrument, cs []kite.Candle, d market.Date, now t
 		}
 		ones = append(ones, b)
 	}
-	bars, err := market.Resample(ones, market.NSESession, tf)
-	if err != nil {
-		return nil, err
+	if bars, err = market.Resample(ones, market.NSESession, tf); err != nil {
+		return nil, nil, err
 	}
 	for len(bars) > 0 && bars[len(bars)-1].End.After(now) {
 		bars = bars[:len(bars)-1]
 	}
-	return bars, nil
+	return bars, ones, nil
 }
 
 func postHMACrosses(ctx context.Context, client *slack.Client, channel string, st *paperDayState, cfg paper.CrossConfig,
-	crosses []paper.Cross, now time.Time, sentPath string, exit func(ctx context.Context, symbol string) (string, error)) error {
+	crosses []paper.Cross, now time.Time, sentPath, tsPath string, exit func(ctx context.Context, symbol string) (string, error)) error {
 	sent, err := loadSent(sentPath)
 	if err != nil {
+		return err
+	}
+	tss := map[string]string{}
+	if _, err := readJSONFile(tsPath, &tss); err != nil {
 		return err
 	}
 	buttons := os.Getenv("SLACK_ORDER_USERS") != ""
 	fresh := 0
 	for _, c := range crosses {
-		dir := "down"
-		if c.Up {
-			dir = "up"
-		}
-		id := fmt.Sprintf("%s|%s|%s|%s", paper.HMACrossName, c.Instrument.Key(), c.Time.UTC().Format(time.RFC3339), dir)
+		id := hmaCrossID(c)
 		if sent[id] {
 			continue
 		}
@@ -196,6 +199,10 @@ func postHMACrosses(ctx context.Context, client *slack.Client, channel string, s
 		if err := saveSent(sentPath, sent); err != nil {
 			return err
 		}
+		tss[id] = ts
+		if err := writeJSONFile(tsPath, tss); err != nil {
+			return err
+		}
 	}
 	switch {
 	case fresh == 0:
@@ -204,6 +211,70 @@ func postHMACrosses(ctx context.Context, client *slack.Client, channel string, s
 		fmt.Printf("%d new cross(es); --slack posts them\n", fresh)
 	}
 	return nil
+}
+
+// hmaCrossID names a cross in the sent and ts files.
+func hmaCrossID(c paper.Cross) string {
+	dir := "down"
+	if c.Up {
+		dir = "up"
+	}
+	return fmt.Sprintf("%s|%s|%s|%s", paper.HMACrossName, c.Instrument.Key(), c.Time.UTC().Format(time.RFC3339), dir)
+}
+
+// postHMANears posts each near-HMA pullback not yet posted, in the thread of
+// its up-cross when that message's ts is known, with the order buttons while
+// the minute is fresh.
+func postHMANears(ctx context.Context, client *slack.Client, channel string, st *paperDayState, cfg paper.CrossConfig,
+	nears []paper.Near, now time.Time, sentPath, tsPath string) error {
+	if len(nears) == 0 {
+		return nil
+	}
+	sent, err := loadSent(sentPath)
+	if err != nil {
+		return err
+	}
+	tss := map[string]string{}
+	if _, err := readJSONFile(tsPath, &tss); err != nil {
+		return err
+	}
+	buttons := os.Getenv("SLACK_ORDER_USERS") != ""
+	for _, n := range nears {
+		id := "near|" + hmaCrossID(n.Cross)
+		if sent[id] {
+			continue
+		}
+		text := hmaNearText(n, cfg)
+		fmt.Println(text)
+		if client == nil {
+			continue
+		}
+		blocks := []slack.Block{slack.SectionBlock(text)}
+		if buttons && now.Sub(n.Time.Add(time.Minute)) <= hmaCrossMaxAge {
+			if row := hmaCrossButtons(st, n.Cross); row != nil {
+				blocks = append(blocks, row)
+			}
+		}
+		if ts := tss[hmaCrossID(n.Cross)]; ts != "" {
+			err = client.ReplyBlocks(ctx, channel, ts, text, blocks)
+		} else {
+			_, err = client.PostBlocks(ctx, channel, text, blocks)
+		}
+		if err != nil {
+			return err
+		}
+		sent[id] = true
+		if err := saveSent(sentPath, sent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func hmaNearText(n paper.Near, cfg paper.CrossConfig) string {
+	return fmt.Sprintf(":dart: *%s* %s near HMA%d · low ₹%s at %s vs %dm HMA%d %.2f (within %.0f%%) · after the %s up-cross",
+		paper.HMACrossName, paperName(n.Cross.Instrument), n.Period, n.Low, n.Time.In(market.IST).Format("15:04"),
+		cfg.TF, n.Period, n.MA, cfg.NearPct*100, n.Cross.End.In(market.IST).Format("15:04"))
 }
 
 func hmaCrossText(c paper.Cross, cfg paper.CrossConfig) string {

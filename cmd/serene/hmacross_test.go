@@ -93,7 +93,7 @@ func TestHMACrossBarsDropsForming(t *testing.T) {
 		cs = append(cs, kite.Candle{Time: d.At(9, 15).Add(time.Duration(m) * time.Minute), Open: 100, High: 101, Low: 99, Close: 100})
 	}
 	now := d.At(9, 38).Add(20 * time.Second)
-	bars, err := hmaCrossBars(inst, cs, d, now, 10)
+	bars, _, err := hmaCrossBars(inst, cs, d, now, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
