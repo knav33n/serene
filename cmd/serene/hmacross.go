@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"serene/internal/fyers"
 	"serene/internal/kite"
 	"serene/internal/manual"
 	"serene/internal/market"
@@ -36,6 +37,8 @@ func runHMACross(ctx context.Context, args []string) error {
 	step := fs.Float64("step", 100, "the index open is rounded to this for the strike")
 	warm := fs.Int("warm", 4, "prior trading days of bars to warm the averages")
 	exit := fs.Bool("exit", false, "with --slack: on a fresh down-cross, sell on Zerodha what the Buy buttons bought of that leg today (REAL orders)")
+	fyersTrade := fs.Bool("fyers", false, "with --slack: on a fresh near-HMA alert buy 1 lot on Fyers, once a day, and sell at a 2% target by limit (REAL orders)")
+	nearDir := fs.String("near-dir", "data/hmanear", "the near-HMA Fyers trade's state, one file a day")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -63,16 +66,20 @@ func runHMACross(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	if *exit && client == nil {
-		return errors.New("--exit needs --slack")
+	if (*exit || *fyersTrade) && client == nil {
+		return errors.New("--exit and --fyers need --slack")
 	}
-	err = hmaCross(ctx, client, channel, d, now, *dir, *sentPath, *tsPath, *step, *warm, *exit)
+	nd := ""
+	if *fyersTrade {
+		nd = *nearDir
+	}
+	err = hmaCross(ctx, client, channel, d, now, *dir, *sentPath, *tsPath, nd, *step, *warm, *exit)
 	alertOnce(ctx, client, channel, *alertPath, "serene paper "+paper.HMACrossName, err)
 	return err
 }
 
 func hmaCross(ctx context.Context, client *slack.Client, channel string, d market.Date, now time.Time,
-	dir, sentPath, tsPath string, step float64, warm int, exit bool) error {
+	dir, sentPath, tsPath, nearDir string, step float64, warm int, exit bool) error {
 	kc, err := kiteClient(ctx)
 	if err != nil {
 		return err
@@ -117,7 +124,55 @@ func hmaCross(ctx context.Context, client *slack.Client, channel string, d marke
 	if err := postHMACrosses(ctx, client, channel, st, cfg, crosses, now, sentPath, tsPath, exitFn); err != nil {
 		return err
 	}
-	return postHMANears(ctx, client, channel, st, cfg, paper.HMANears(legs, crosses, cfg), now, sentPath, tsPath)
+	nears := paper.HMANears(legs, crosses, cfg)
+	if err := postHMANears(ctx, client, channel, st, cfg, nears, now, sentPath, tsPath); err != nil {
+		return err
+	}
+	if nearDir == "" || d != market.DateOf(time.Now().In(market.IST)) {
+		return nil
+	}
+	return hmaNearTrade(ctx, nearDeps{
+		broker: &lazyFyers{c: &clients{at: map[string]time.Time{}}},
+		ticker: func(ctx context.Context, right market.Right) (string, int64, error) {
+			rows, err := fyers.New("", "", nil).SymbolMaster(ctx, "NSE_FO")
+			if err != nil {
+				return "", 0, err
+			}
+			for _, r := range rows {
+				if r.Underlying == "NIFTY" && r.Expiry == st.Expiry && r.Strike == st.Strike && r.Right == string(right) {
+					return r.Ticker, r.LotSize, nil
+				}
+			}
+			return "", 0, fmt.Errorf("no Fyers NIFTY %v %s for %s", st.Strike, right, st.Expiry)
+		},
+		price: func(ctx context.Context, symbol string) (float64, error) {
+			q, err := kc.Quotes(ctx, []string{"NFO:" + symbol})
+			if err != nil {
+				return 0, err
+			}
+			v, ok := q["NFO:"+symbol]
+			if !ok || v.Last <= 0 {
+				return 0, fmt.Errorf("no quote for %s", symbol)
+			}
+			return v.Last, nil
+		},
+		notify: func(ctx context.Context, t *nearTrade, msg string) {
+			fmt.Println(msg)
+			tss := map[string]string{}
+			_, _ = readJSONFile(tsPath, &tss)
+			var err error
+			if ts := tss[t.Cross]; ts != "" {
+				err = client.Reply(ctx, channel, ts, msg)
+			} else {
+				err = client.Post(ctx, channel, msg)
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "slack:", err)
+			}
+		},
+		sleep: sleepCtx,
+		now:   time.Now,
+	}, st, nears, nearDir)
 }
 
 // hmaCrossBars is Kite's minute candles, whole minutes in the session up to
@@ -479,4 +534,32 @@ func awaitFill(ctx context.Context, kc interface {
 		}
 	}
 	return fmt.Sprintf(":hourglass: %s placed; status %s after 30s, check Kite", what, st.Status), nil
+}
+
+// lazyFyers logs in to Fyers on the first call, so a day without a near-HMA
+// trade doesn't need the day's Fyers login.
+type lazyFyers struct{ c *clients }
+
+func (l *lazyFyers) PlaceOrder(ctx context.Context, o fyers.OrderRequest) (string, error) {
+	t, err := l.c.fyers(ctx)
+	if err != nil {
+		return "", err
+	}
+	return t.PlaceOrder(ctx, o)
+}
+
+func (l *lazyFyers) Order(ctx context.Context, id string) (fyers.Order, error) {
+	t, err := l.c.fyers(ctx)
+	if err != nil {
+		return fyers.Order{}, err
+	}
+	return t.Order(ctx, id)
+}
+
+func (l *lazyFyers) Positions(ctx context.Context) ([]fyers.Position, error) {
+	t, err := l.c.fyers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return t.Positions(ctx)
 }

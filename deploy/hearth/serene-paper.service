@@ -8,5 +8,5 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-ExecStart=/home/serene/app/serene paper hmacross --slack --exit
+ExecStart=/home/serene/app/serene paper hmacross --slack --exit --fyers
 TimeoutStartSec=5min
