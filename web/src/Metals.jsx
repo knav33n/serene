@@ -1,8 +1,8 @@
 // Hearth's Gold & Silver page (POST /api/mcx): a card per metal with everything it has made, the
 // live strategies' state, the open MCX positions on Zerodha and the strategies' closed trades.
 import { useState } from "react";
+import { rupees } from "./Manual.jsx";
 
-export const rupees = v => v == null ? "–" : (v < 0 ? "−₹" : "₹") + Math.abs(Math.round(v)).toLocaleString("en-IN");
 const METALS = { gold: "Gold", silver: "Silver" };
 const px = v => v == null ? "–" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 const tone = v => v == null || v === 0 ? "" : v > 0 ? "up" : "down";

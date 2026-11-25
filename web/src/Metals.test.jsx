@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import App from "./App.jsx";
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); location.hash = ""; });
 
 const mcx = {
   at: "2026-11-24 15:00:00",
@@ -16,7 +16,8 @@ const mcx = {
              entry_at: "2026-11-24 10:00:00", exit: 150800, exit_at: "2026-11-24 12:00:00", reason: "cross", gross: -4000, charges: 60, net: -4060 }],
 };
 
-it("shows a card per metal and the positions and trades", async () => {
+it("shows a card per metal and the positions and trades on #metals", async () => {
+  location.hash = "#metals";
   vi.stubGlobal("fetch", vi.fn(async path => {
     const result = path === "api/session" ? { gated: false, in: true } : path === "api/mcx" ? mcx : null;
     return { ok: true, headers: { get: () => "application/json" }, json: async () => ({ ok: true, result }) };
