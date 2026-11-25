@@ -163,12 +163,4 @@ main.gate { min-height: 100vh; display: grid; place-items: center; padding: 24px
 .gatecard button.b.unlock:disabled { opacity: .45; cursor: not-allowed; }
 .desk .tools button.b.quiet { padding: 8px 10px; }
 
-/* Made since: the running total of the desk's trades */
-.earned { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 16px 18px; display: grid; gap: 10px; }
-.earned .ehead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.earned .ehead .k { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); font-weight: 600; }
-.earned .ehead .days { font-size: 12px; color: var(--ink-3); }
-.earned .etotal { font: 760 34px/1.05 var(--display); font-stretch: 80%; }
-.earned .ebrokers { display: flex; flex-wrap: wrap; gap: 8px 24px; padding-top: 10px; border-top: 1px solid var(--rule); }
-.earned .eb { display: flex; align-items: baseline; gap: 10px; font-size: 15px; }
 .taken { background: var(--panel); border: 1px dashed var(--rule); border-radius: 12px; padding: 14px 18px; color: var(--ink-2); font-size: 14px; }

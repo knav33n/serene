@@ -143,14 +143,12 @@ describe("gate", () => {
 
   const card = { since: "2026-11-25", days: 4, net: 3110.62, brokers: { zerodha: -1000, upstox: 4110.62 } };
 
-  it("shows the running total by broker above the form", async () => {
+  it("shows no running-total card", async () => {
     serve({ "api/manual": () => ({ ...view, trading_day: true, traded: false, card }) });
     render(<App />);
-    expect(await screen.findByText("Made since 25 Nov")).toBeTruthy();
-    expect(screen.getByText("₹3,111")).toBeTruthy(); // the sum
-    expect(screen.getByText("₹4,111")).toBeTruthy();
-    expect(screen.getByText("−₹1,000")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Buy" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Buy" })).toBeTruthy();
+    expect(screen.queryByText(/Made since/)).toBeNull();
+    expect(screen.queryByText("₹3,111")).toBeNull();
   });
 
   it("hides the form once the day's trade is taken, keeping positions and today", async () => {
@@ -163,10 +161,11 @@ describe("gate", () => {
     expect(screen.getByRole("button", { name: "Sell now" })).toBeTruthy();
   });
 
-  it("shows only the card on a holiday", async () => {
+  it("shows only a closed note on a holiday", async () => {
     serve({ "api/manual": () => ({ ...view, trading_day: false, traded: false, card }) });
     render(<App />);
-    expect(await screen.findByText("Made since 25 Nov")).toBeTruthy();
+    expect(await screen.findByText(/No trading today/)).toBeTruthy();
+    expect(screen.queryByText(/Made since/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Buy" })).toBeNull();
     expect(screen.queryByText("Positions")).toBeNull();
     expect(screen.queryByText("Today")).toBeNull();
