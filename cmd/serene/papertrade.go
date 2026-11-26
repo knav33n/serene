@@ -46,20 +46,46 @@ func hmaIndexOf(symbol string) hmaIndex {
 	return hmaIndices[0]
 }
 
+// hmaStrikeOffsets: the strikes watched around the open's ATM, in steps
+// (user, 2026-11-26: ATM, +100 and −100, CE and PE).
+var hmaStrikeOffsets = []float64{-1, 0, 1}
+
 // paperDayState is the day's watched contracts, chosen once at the open and
-// kept so every later run watches the same two.
+// kept so every later run watches the same ones.
 type paperDayState struct {
 	Day    market.Date `json:"day"`
 	Index  string      `json:"index,omitempty"` // NIFTY when empty (files before 2026-11-26)
 	Open   float64     `json:"index_open"`
-	Strike float64     `json:"strike"`
+	Strike float64     `json:"strike"` // ATM
 	Expiry market.Date `json:"expiry"`
 	Lot    int64       `json:"lot_size"`
-	Legs   []struct {
-		Right  market.Right `json:"right"`
-		Token  int64        `json:"token"`
-		Symbol string       `json:"symbol"`
-	} `json:"legs"`
+	Legs   []paperLeg  `json:"legs"`
+}
+
+// paperLeg is one watched contract.
+type paperLeg struct {
+	Right  market.Right `json:"right"`
+	Token  int64        `json:"token"`
+	Symbol string       `json:"symbol"`
+	Strike float64      `json:"strike,omitempty"` // the day's ATM when 0 (files before 2026-11-27)
+}
+
+// legStrike is l's strike.
+func (st *paperDayState) legStrike(l paperLeg) float64 {
+	if l.Strike != 0 {
+		return l.Strike
+	}
+	return st.Strike
+}
+
+// legOf is the leg in is, or nil.
+func (st *paperDayState) legOf(in market.Instrument) *paperLeg {
+	for i, l := range st.Legs {
+		if l.Right == in.Right && market.Rupees(st.legStrike(l)) == in.Strike {
+			return &st.Legs[i]
+		}
+	}
+	return nil
 }
 
 // paperDay loads or makes the day's contract choice. It is nil, with no
@@ -96,19 +122,19 @@ func paperDay(ctx context.Context, kc *kite.Client, x hmaIndex, d market.Date, n
 			st.Expiry = in.Expiry
 		}
 	}
-	for _, in := range ins {
-		if in.Name != x.Name || in.Expiry != st.Expiry || in.Strike != st.Strike || (in.Type != "CE" && in.Type != "PE") {
-			continue
+	for _, off := range hmaStrikeOffsets {
+		k := st.Strike + off*x.Step
+		n := len(st.Legs)
+		for _, in := range ins {
+			if in.Name != x.Name || in.Expiry != st.Expiry || in.Strike != k || (in.Type != "CE" && in.Type != "PE") {
+				continue
+			}
+			st.Lot = in.LotSize
+			st.Legs = append(st.Legs, paperLeg{Right: market.Right(in.Type), Token: in.Token, Symbol: in.Symbol, Strike: k})
 		}
-		st.Lot = in.LotSize
-		st.Legs = append(st.Legs, struct {
-			Right  market.Right `json:"right"`
-			Token  int64        `json:"token"`
-			Symbol string       `json:"symbol"`
-		}{market.Right(in.Type), in.Token, in.Symbol})
-	}
-	if len(st.Legs) != 2 || st.Lot <= 0 {
-		return nil, fmt.Errorf("%s %v CE/PE for %s not in Kite's %s list", x.Name, st.Strike, st.Expiry, x.Exchange)
+		if len(st.Legs) != n+2 || st.Lot <= 0 {
+			return nil, fmt.Errorf("%s %v CE/PE for %s not in Kite's %s list", x.Name, k, st.Expiry, x.Exchange)
+		}
 	}
 	if err := writeJSONFile(path, st); err != nil {
 		return nil, err

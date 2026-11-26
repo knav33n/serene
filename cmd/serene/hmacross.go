@@ -21,12 +21,13 @@ import (
 // without order buttons.
 const hmaCrossMaxAge = 15 * time.Minute
 
-// runHMACross posts hma_crossover's signals: each run fetches the day's ATM
-// CE and PE minute bars of NIFTY and SENSEX from Kite, builds 10-minute bars,
+// runHMACross posts hma_crossover's signals: each run fetches the day's ATM,
+// ATM−100 and ATM+100 CE and PE minute bars of NIFTY and SENSEX from Kite, builds 10-minute bars,
 // and posts every HMA 13/34 up-cross of the day not yet posted, with Zerodha
 // buy buttons for both legs, and each near-HMA pullback after one. With
 // --fyers and --zerodha, the first two fresh pullbacks of each index a day
-// are bought on that broker and sold at a 2% target.
+// are bought on that broker and sold at a 2% target: one entry per contract,
+// none in a contract another strategy holds.
 func runHMACross(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("paper hmacross", flag.ContinueOnError)
 	useSlack := fs.Bool("slack", false, "post new crosses to SLACK_PAPER_CHANNEL")
@@ -130,7 +131,7 @@ func hmaCrossIndex(ctx context.Context, kc *kite.Client, client *slack.Client, c
 	}
 	var legs []paper.Leg
 	for _, l := range st.Legs {
-		inst := market.Option(x.Exchange, x.Name, st.Expiry, market.Rupees(st.Strike), l.Right, st.Lot)
+		inst := market.Option(x.Exchange, x.Name, st.Expiry, market.Rupees(st.legStrike(l)), l.Right, st.Lot)
 		cs, err := kc.Candles(ctx, l.Token, "minute", first.At(9, 15), earlier(now, d.At(15, 40)), false)
 		if err != nil {
 			return st, nil, fmt.Errorf("%s candles: %w", l.Symbol, err)
@@ -144,8 +145,8 @@ func hmaCrossIndex(ctx context.Context, kc *kite.Client, client *slack.Client, c
 	// Down-crosses aren't posted, but they end an up-cross's near-HMA watch.
 	crosses := paper.HMACrosses(legs, cfg)
 	if len(crosses) == 0 {
-		fmt.Printf("%s: no cross yet (watching %s %s CE/PE, exp %s, %dm HMA %d/%d)\n",
-			d, x.Name, market.Rupees(st.Strike), st.Expiry, cfg.TF, cfg.Fast, cfg.Slow)
+		fmt.Printf("%s: no cross yet (watching %s %s±%v CE/PE, exp %s, %dm HMA %d/%d)\n",
+			d, x.Name, market.Rupees(st.Strike), x.Step, st.Expiry, cfg.TF, cfg.Fast, cfg.Slow)
 		return st, nil, nil
 	}
 	if err := postHMACrosses(ctx, client, channel, st, cfg, crosses, now, sentPath, tsPath); err != nil {
@@ -308,13 +309,16 @@ func hmaCrossText(c paper.Cross, cfg paper.CrossConfig) string {
 		c.Time.In(market.IST).Format("15:04"), c.End.In(market.IST).Format("15:04"))
 }
 
-// hmaCrossButtons is Buy CE and Buy PE on every cross, the crossing leg's
-// buy green on an up-cross, and on a down-cross a red Sell for the crossing
-// leg, which sells what is held of it.
+// hmaCrossButtons is Buy CE and Buy PE of the crossing leg's strike on
+// every cross, the crossing leg's buy green on an up-cross, and on a
+// down-cross a red Sell for the crossing leg, which sells what is held of it.
 func hmaCrossButtons(st *paperDayState, c paper.Cross) slack.Block {
 	var bs []manual.OrderButton
 	var sell *manual.OrderButton
 	for _, l := range st.Legs {
+		if market.Rupees(st.legStrike(l)) != c.Instrument.Strike {
+			continue
+		}
 		r := string(l.Right)
 		b := manual.OrderButton{Order: manual.FutOrder{Strategy: paper.HMACrossName, Side: market.Buy, Symbol: l.Symbol},
 			Text:    "Buy " + r,
@@ -341,10 +345,8 @@ func hmaCrossButtons(st *paperDayState, c paper.Cross) slack.Block {
 
 // hmaCrossLegSymbol is the Kite symbol of the leg c crossed on.
 func hmaCrossLegSymbol(st *paperDayState, c paper.Cross) string {
-	for _, l := range st.Legs {
-		if l.Right == c.Instrument.Right {
-			return l.Symbol
-		}
+	if l := st.legOf(c.Instrument); l != nil {
+		return l.Symbol
 	}
 	return ""
 }

@@ -22,7 +22,10 @@ import (
 // Zerodha, at most twice a day per index on each broker. Fyers buys with all
 // the free cash at that moment, Zerodha with up to ₹1L. The server watches
 // the price and, once it reaches 2% over the fill, sells at a LIMIT of that
-// target. No GTT, no resting target order, no stop loss.
+// target. No GTT, no resting target order, no stop loss. From 2026-11-27
+// (user): alerts come from the ATM and ±100 strikes, a contract is entered
+// at most once a day per broker, and never while that broker already holds
+// a position in it (another strategy's, e.g. stbt's straddle, or a manual one).
 const (
 	nearTradeTag    = "hmanear"
 	nearTargetPct   = 0.02
@@ -51,7 +54,8 @@ type nearTrade struct {
 	Lot    int64        `json:"lot"`
 	Freeze int64        `json:"freeze"` // largest single order
 	// Phase: buying (buys placed, fills unknown), holding (target watched),
-	// selling (target limits placed), done, failed.
+	// selling (target limits placed), done, failed; skipped (not bought, as
+	// the broker already held the contract) doesn't count as a trade.
 	Phase   string   `json:"phase"`
 	BuyIDs  []string `json:"buy_ids,omitempty"`
 	Entry   float64  `json:"entry,omitempty"`
@@ -59,6 +63,12 @@ type nearTrade struct {
 	SellIDs []string `json:"sell_ids,omitempty"`
 	Sold    int64    `json:"sold,omitempty"`
 	SoldAmt float64  `json:"sold_amt,omitempty"` // ₹ value of what was sold
+	// The tick CSV (from 2026-11-27): from the near alert's minute to the
+	// close, sent to Slack once.
+	SignalAt  time.Time `json:"signal_at,omitzero"` // the near-HMA minute's start
+	BuyAt     time.Time `json:"buy_at,omitzero"`    // the buys were placed
+	ClosedAt  time.Time `json:"closed_at,omitzero"` // the target sells filled
+	TicksSent bool      `json:"ticks_sent,omitempty"`
 }
 
 func (t *nearTrade) active() bool {
@@ -79,11 +89,14 @@ type nearBroker interface {
 	// Cap is the ₹ to spend on one trade now.
 	Cap(ctx context.Context) (float64, error)
 	// Ticker is the broker's symbol and lot size of a leg of the day's contracts.
-	Ticker(ctx context.Context, x hmaIndex, st *paperDayState, right market.Right) (string, int64, error)
+	Ticker(ctx context.Context, x hmaIndex, st *paperDayState, leg paperLeg) (string, int64, error)
 	Place(ctx context.Context, ticker, side, typ string, qty int64, price float64) (string, error)
 	Order(ctx context.Context, ticker, id string) (nearOrder, error)
 	// Held is the intraday quantity held long of ticker.
 	Held(ctx context.Context, ticker string) (int64, error)
+	// Open is the size of every position open in ticker, long or short, in
+	// any product.
+	Open(ctx context.Context, ticker string) (int64, error)
 }
 
 // nearRun is one index's day for the trade.
@@ -100,7 +113,13 @@ type nearDeps struct {
 	notify func(ctx context.Context, t *nearTrade, msg string)
 	sleep  func(ctx context.Context, d time.Duration) error
 	now    func() time.Time
+	// ticks sends t's ticks from its signal to end as a CSV; why says how
+	// the window ended.
+	ticks func(ctx context.Context, t *nearTrade, end time.Time, why string) error
 }
+
+// nearTicksEnd: a trade still open then has its ticks sent up to then.
+const nearTicksEnd = 15*60 + 30
 
 // nearTargetPrice is 2% over the fill, rounded up to the 5-paise tick.
 func nearTargetPrice(entry float64) float64 {
@@ -157,36 +176,107 @@ func hmaNearTrade(ctx context.Context, dep nearDeps, runs []nearRun, dir string)
 	if err := nearWatchAll(ctx, dep, books); err != nil {
 		errs = append(errs, err)
 	}
+	if err := nearTicksAll(ctx, dep, books); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
+// nearTicksAll sends, once, the tick CSV of each bought trade that closed,
+// and of each still open at 15:30 (Fyers' and Zerodha's intraday
+// square-off, or a sale by hand, isn't seen here).
+func nearTicksAll(ctx context.Context, dep nearDeps, books []*nearBook) error {
+	if dep.ticks == nil {
+		return nil
+	}
+	now := dep.now().In(market.IST)
+	for _, bk := range books {
+		for i := range bk.trades {
+			t := &bk.trades[i]
+			if t.TicksSent || t.Entry <= 0 || t.BuyAt.IsZero() {
+				continue
+			}
+			var end time.Time
+			var why string
+			switch {
+			case t.Phase == "done" && t.Sold >= t.Qty && t.Sold > 0:
+				end, why = t.ClosedAt, "target filled"
+			case t.Phase == "done":
+				end, why = t.ClosedAt, "target reached, not sold here"
+			case t.active() && minuteOfDay(now) >= nearTicksEnd:
+				end, why = t.Day.At(15, 30), "still open at 15:30, not closed by the target"
+			default:
+				continue
+			}
+			if end.IsZero() {
+				end = now
+			}
+			if err := dep.ticks(ctx, t, end, why); err != nil {
+				dep.notify(ctx, t, fmt.Sprintf(":warning: %s %s tick CSV of %s not sent: %v (the day's ticks stay on hearth in data/ticks)",
+					t.Index, brokerTitle(t.Broker), t.Ticker, err))
+			}
+			t.TicksSent = true
+			if err := bk.save(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // nearOpen buys, on b, each fresh near alert of r not yet traded there,
-// while b has fewer than nearPerDay trades of the index today.
+// while b has fewer than nearPerDay trades of the index today, in a
+// contract b hasn't traded today and holds no position in.
 func nearOpen(ctx context.Context, dep nearDeps, b nearBroker, bk *nearBook, r nearRun) error {
 	now := dep.now()
 	for _, n := range r.nears {
-		if len(bk.trades) >= nearPerDay {
+		if nearCount(bk.trades) >= nearPerDay {
 			return nil
 		}
 		id := "near|" + hmaCrossID(n.Cross)
 		if now.Sub(n.Time.Add(time.Minute)) > nearMaxAge || minuteOfDay(n.Time) >= nearLastEntry || slicesHasNear(bk.trades, id) {
 			continue
 		}
-		sym := hmaCrossLegSymbol(r.st, n.Cross)
+		leg := r.st.legOf(n.Cross.Instrument)
+		if leg == nil {
+			return fmt.Errorf("no watched leg for %s", n.Cross.Instrument.Key())
+		}
+		quote := string(r.idx.Exchange) + ":" + leg.Symbol
+		if nearEntered(bk.trades, quote) {
+			fmt.Printf("%s %s: %s already entered today; near alert not bought\n", b.Name(), r.idx.Name, leg.Symbol)
+			continue
+		}
 		t := nearTrade{Day: r.st.Day, Index: r.idx.Name, Broker: b.Name(), Near: id, Cross: hmaCrossID(n.Cross),
-			Right: n.Cross.Instrument.Right, Quote: string(r.idx.Exchange) + ":" + sym, Freeze: r.idx.Freeze, Phase: "failed"}
+			Right: n.Cross.Instrument.Right, Quote: quote, Freeze: r.idx.Freeze, Phase: "failed", SignalAt: n.Time}
 		// Every failure from here on still uses up one of the day's trades.
 		fail := func(why string) error {
 			bk.trades = append(bk.trades, t)
 			dep.notify(ctx, &bk.trades[len(bk.trades)-1], fmt.Sprintf(":rotating_light: %s %s near-HMA auto buy on %s: %s; %d of %d trades today used",
-				paper.HMACrossName, r.idx.Name, brokerTitle(b.Name()), why, len(bk.trades), nearPerDay))
+				paper.HMACrossName, r.idx.Name, brokerTitle(b.Name()), why, nearCount(bk.trades), nearPerDay))
 			return bk.save()
 		}
-		ticker, lot, err := b.Ticker(ctx, r.idx, r.st, t.Right)
+		ticker, lot, err := b.Ticker(ctx, r.idx, r.st, *leg)
 		if err != nil {
-			return fail(fmt.Sprintf("no ticker for %s: %v", sym, err))
+			return fail(fmt.Sprintf("no ticker for %s: %v", leg.Symbol, err))
 		}
 		t.Ticker, t.Lot = ticker, lot
+		// Another strategy's (or a manual) position in the contract: not
+		// bought, and not counted. Unknown positions aren't bought either.
+		open, err := b.Open(ctx, ticker)
+		if err != nil || open != 0 {
+			why := fmt.Sprintf("%s already has a position of %d in %s", brokerTitle(b.Name()), open, ticker)
+			if err != nil {
+				why = fmt.Sprintf("couldn't check %s positions: %v", brokerTitle(b.Name()), err)
+			}
+			t.Phase = "skipped"
+			bk.trades = append(bk.trades, t)
+			dep.notify(ctx, &bk.trades[len(bk.trades)-1], fmt.Sprintf(":no_entry: %s %s near-HMA auto buy skipped: %s; %d of %d trades today used",
+				paper.HMACrossName, r.idx.Name, why, nearCount(bk.trades), nearPerDay))
+			if err := bk.save(); err != nil {
+				return err
+			}
+			continue
+		}
 		cap, err := b.Cap(ctx)
 		if err != nil {
 			return fail(fmt.Sprintf("funds: %v", err))
@@ -199,7 +289,7 @@ func nearOpen(ctx context.Context, dep nearDeps, b nearBroker, bk *nearBook, r n
 		if lots <= 0 {
 			return fail(fmt.Sprintf("₹%.0f buys no lot of %s at ₹%.2f (lot %d)", cap, ticker, px[t.Quote], lot))
 		}
-		t.Qty, t.Phase = lots*lot, "buying"
+		t.Qty, t.Phase, t.BuyAt = lots*lot, "buying", dep.now()
 		bk.trades = append(bk.trades, t)
 		tp := &bk.trades[len(bk.trades)-1]
 		// Saved before the orders, so a crash can't buy twice.
@@ -226,6 +316,28 @@ func nearOpen(ctx context.Context, dep nearDeps, b nearBroker, bk *nearBook, r n
 		}
 	}
 	return nil
+}
+
+// nearCount is the trades that count toward nearPerDay: all but skipped.
+func nearCount(ts []nearTrade) int {
+	n := 0
+	for _, t := range ts {
+		if t.Phase != "skipped" {
+			n++
+		}
+	}
+	return n
+}
+
+// nearEntered says whether a trade other than a skipped one was opened in
+// the contract quote (Kite's EXCHANGE:SYMBOL).
+func nearEntered(ts []nearTrade, quote string) bool {
+	for _, t := range ts {
+		if t.Quote == quote && t.Phase != "skipped" {
+			return true
+		}
+	}
+	return false
 }
 
 func slicesHasNear(ts []nearTrade, id string) bool {
@@ -352,7 +464,7 @@ func nearStep(ctx context.Context, dep nearDeps, b nearBroker, bk *nearBook, t *
 		}
 		left := t.Qty - t.Sold
 		if held < need {
-			t.Phase = "done"
+			t.Phase, t.ClosedAt = "done", dep.now()
 			dep.notify(ctx, t, fmt.Sprintf(":warning: %s: %s reached the ₹%.2f target but %d is held of the %d the auto trades bought; nothing sold, sell it yourself",
 				who, t.Ticker, t.Target, held, need))
 			return nil
@@ -382,7 +494,7 @@ func nearStep(ctx context.Context, dep nearDeps, b nearBroker, bk *nearBook, t *
 			dep.notify(ctx, t, fmt.Sprintf(":warning: %s target sell of %s %s; %d of %d sold, watching the target again", who, t.Ticker, o.Status, t.Sold, t.Qty))
 			return nil
 		}
-		t.Phase = "done"
+		t.Phase, t.ClosedAt = "done", dep.now()
 		exit := t.SoldAmt / float64(t.Sold)
 		dep.notify(ctx, t, fmt.Sprintf(":moneybag: %s near-HMA target hit: SELL %d %s filled @ ₹%.2f (bought ₹%.2f, ₹%+.0f before charges)",
 			who, t.Qty, t.Ticker, exit, t.Entry, t.SoldAmt-t.Entry*float64(t.Qty)))
@@ -429,6 +541,9 @@ func nearLiveDeps(kc *kite.Client, brokers []string, client *slack.Client, chann
 		sleep: sleepCtx,
 		now:   time.Now,
 	}
+	dep.ticks = func(ctx context.Context, t *nearTrade, end time.Time, why string) error {
+		return sendNearTicks(ctx, client, channel, tsPath, "data/ticks", t, end, why)
+	}
 	for _, name := range brokers {
 		switch name {
 		case "fyers":
@@ -464,7 +579,7 @@ func (*fyersNear) Name() string { return "fyers" }
 
 func (b *fyersNear) Cap(ctx context.Context) (float64, error) { return b.f.Funds(ctx) }
 
-func (b *fyersNear) Ticker(ctx context.Context, x hmaIndex, st *paperDayState, right market.Right) (string, int64, error) {
+func (b *fyersNear) Ticker(ctx context.Context, x hmaIndex, st *paperDayState, leg paperLeg) (string, int64, error) {
 	if b.master == nil {
 		b.master = map[string][]fyers.MasterRow{}
 	}
@@ -476,12 +591,13 @@ func (b *fyersNear) Ticker(ctx context.Context, x hmaIndex, st *paperDayState, r
 		}
 		b.master[x.FyersSeg] = rows
 	}
+	k := st.legStrike(leg)
 	for _, r := range rows {
-		if r.Underlying == x.Name && r.Expiry == st.Expiry && r.Strike == st.Strike && r.Right == string(right) {
+		if r.Underlying == x.Name && r.Expiry == st.Expiry && r.Strike == k && r.Right == string(leg.Right) {
 			return r.Ticker, r.LotSize, nil
 		}
 	}
-	return "", 0, fmt.Errorf("no Fyers %s %v %s for %s", x.Name, st.Strike, right, st.Expiry)
+	return "", 0, fmt.Errorf("no Fyers %s %v %s for %s", x.Name, k, leg.Right, st.Expiry)
 }
 
 func (b *fyersNear) Place(ctx context.Context, ticker, side, typ string, qty int64, price float64) (string, error) {
@@ -504,6 +620,20 @@ func (b *fyersNear) Order(ctx context.Context, _, id string) (nearOrder, error) 
 		out.Filled, out.Avg = o.FilledQty, o.TradedPrice
 	}
 	return out, nil
+}
+
+func (b *fyersNear) Open(ctx context.Context, ticker string) (int64, error) {
+	ps, err := b.f.Positions(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var open int64
+	for _, p := range ps {
+		if p.Symbol == ticker {
+			open += abs64(p.NetQty)
+		}
+	}
+	return open, nil
 }
 
 func (b *fyersNear) Held(ctx context.Context, ticker string) (int64, error) {
@@ -542,13 +672,26 @@ func (b *kiteNear) Cap(ctx context.Context) (float64, error) {
 	return min(nearZerodhaCap, f), nil
 }
 
-func (b *kiteNear) Ticker(_ context.Context, x hmaIndex, st *paperDayState, right market.Right) (string, int64, error) {
-	for _, l := range st.Legs {
-		if l.Right == right {
-			return string(x.Exchange) + ":" + l.Symbol, st.Lot, nil
+func (b *kiteNear) Ticker(_ context.Context, x hmaIndex, st *paperDayState, leg paperLeg) (string, int64, error) {
+	if leg.Symbol == "" {
+		return "", 0, fmt.Errorf("no %v %s leg", st.legStrike(leg), leg.Right)
+	}
+	return string(x.Exchange) + ":" + leg.Symbol, st.Lot, nil
+}
+
+func (b *kiteNear) Open(ctx context.Context, ticker string) (int64, error) {
+	exch, sym, _ := strings.Cut(ticker, ":")
+	ps, err := b.kc.Positions(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var open int64
+	for _, p := range ps {
+		if p.Exchange == exch && p.Symbol == sym {
+			open += abs64(p.Qty)
 		}
 	}
-	return "", 0, fmt.Errorf("no %s leg", right)
+	return open, nil
 }
 
 func (b *kiteNear) Place(ctx context.Context, ticker, side, typ string, qty int64, price float64) (string, error) {
@@ -604,7 +747,7 @@ func hmaNearSizes(ctx context.Context, d market.Date, now time.Time, dir string)
 				continue
 			}
 			for _, l := range st.Legs {
-				ticker, lot, err := b.Ticker(ctx, x, st, l.Right)
+				ticker, lot, err := b.Ticker(ctx, x, st, l)
 				if err != nil {
 					fmt.Printf("%s %s %s: %v\n", x.Name, b.Name(), l.Right, err)
 					continue
@@ -621,4 +764,45 @@ func hmaNearSizes(ctx context.Context, d market.Date, now time.Time, dir string)
 		}
 	}
 	return nil
+}
+
+// sendNearTicks cuts t's window out of the day's tick file of its contract
+// and uploads it in the thread of its up-cross, with the lowest and highest
+// price after the buy, for sizing a stop loss.
+func sendNearTicks(ctx context.Context, client *slack.Client, channel, tsPath, dir string, t *nearTrade, end time.Time, why string) error {
+	from := t.SignalAt
+	if from.IsZero() || t.BuyAt.Before(from) {
+		from = t.BuyAt.Add(-time.Minute)
+	}
+	w, err := readTickWindow(tickPath(dir, t.Day, t.Quote), from, end.Add(5*time.Second), t.BuyAt)
+	if err != nil {
+		return fmt.Errorf("%w (is serene-ticks running?)", err)
+	}
+	if len(w.rows) <= 1 {
+		return fmt.Errorf("no ticks recorded %s–%s (is serene-ticks running?)", clock(from), clock(end))
+	}
+	_, sym, _ := strings.Cut(t.Quote, ":")
+	out := filepath.Join(dir, t.Day.String(), "trades",
+		fmt.Sprintf("%s-%s-%s-%s.csv", t.Index, t.Broker, sym, t.BuyAt.In(market.IST).Format("150405")))
+	if err := writeCSVFile(out, w.rows); err != nil {
+		return err
+	}
+	pct := func(p float64) float64 { return (p/t.Entry - 1) * 100 }
+	msg := fmt.Sprintf(":bar_chart: %s %s ticks of %s, %d rows: alert %s, buy %s @ ₹%.2f, %s %s. After the buy: low ₹%.2f (%+.1f%%), high ₹%.2f (%+.1f%%)",
+		t.Index, brokerTitle(t.Broker), sym, len(w.rows)-1, clock(t.SignalAt), clock(t.BuyAt), t.Entry, why, clock(end),
+		w.low, pct(w.low), w.high, pct(w.high))
+	fmt.Println(msg, "→", out)
+	if client == nil {
+		return nil
+	}
+	tss := map[string]string{}
+	_, _ = readJSONFile(tsPath, &tss)
+	return client.UploadReply(ctx, channel, tss[t.Cross], msg, []slack.File{{Path: out, Title: filepath.Base(out)}})
+}
+
+func clock(t time.Time) string {
+	if t.IsZero() {
+		return "?"
+	}
+	return t.In(market.IST).Format("15:04:05")
 }

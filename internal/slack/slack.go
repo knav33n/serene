@@ -151,6 +151,11 @@ type File struct {
 // Slack's flow is to ask for an upload URL per file, send the bytes there, then
 // complete them together, which shares them.
 func (c *Client) Upload(ctx context.Context, channel, comment string, files []File) error {
+	return c.UploadReply(ctx, channel, "", comment, files)
+}
+
+// UploadReply is Upload in the thread of ts (top level when ts is empty).
+func (c *Client) UploadReply(ctx context.Context, channel, ts, comment string, files []File) error {
 	refs := make([]map[string]string, 0, len(files))
 	for _, f := range files {
 		id, err := c.send(ctx, f)
@@ -159,9 +164,11 @@ func (c *Client) Upload(ctx context.Context, channel, comment string, files []Fi
 		}
 		refs = append(refs, map[string]string{"id": id, "title": f.Title})
 	}
-	return c.call(ctx, "files.completeUploadExternal", map[string]any{
-		"channel_id": channel, "initial_comment": comment, "files": refs,
-	}, nil)
+	args := map[string]any{"channel_id": channel, "initial_comment": comment, "files": refs}
+	if ts != "" {
+		args["thread_ts"] = ts
+	}
+	return c.call(ctx, "files.completeUploadExternal", args, nil)
 }
 
 // send uploads one file's bytes and returns its ID. The token doesn't go to the

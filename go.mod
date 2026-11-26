@@ -3,6 +3,7 @@ module serene
 go 1.27.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/duckdb/duckdb-go/v2 v2.20000.0
 	github.com/jackc/pgx/v5 v5.12.0
 	gopkg.in/yaml.v3 v3.0.1

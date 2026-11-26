@@ -103,18 +103,12 @@ func TestHMACrossBarsDropsForming(t *testing.T) {
 }
 
 func TestHMACrossButtonsDedicated(t *testing.T) {
-	st := &paperDayState{Lot: 65}
-	st.Legs = append(st.Legs,
-		struct {
-			Right  market.Right `json:"right"`
-			Token  int64        `json:"token"`
-			Symbol string       `json:"symbol"`
-		}{market.Call, 1, "NIFTYCE"},
-		struct {
-			Right  market.Right `json:"right"`
-			Token  int64        `json:"token"`
-			Symbol string       `json:"symbol"`
-		}{market.Put, 2, "NIFTYPE"})
+	// Old day files have no leg strikes (the ATM); the +100 legs are new.
+	st := &paperDayState{Lot: 65, Strike: 26000, Legs: []paperLeg{
+		{Right: market.Call, Token: 1, Symbol: "NIFTYCE"},
+		{Right: market.Put, Token: 2, Symbol: "NIFTYPE"},
+		{Right: market.Call, Token: 3, Symbol: "NIFTY26100CE", Strike: 26100},
+		{Right: market.Put, Token: 4, Symbol: "NIFTY26100PE", Strike: 26100}}}
 	d := market.Date{Year: 2026, Month: time.November, Day: 23}
 	pe := market.Option(market.NFO, "NIFTY", d, market.Rupees(26000), market.Put, 65)
 	up, _ := json.Marshal(hmaCrossButtons(st, paper.Cross{Instrument: pe, Up: true}))
@@ -123,6 +117,17 @@ func TestHMACrossButtonsDedicated(t *testing.T) {
 		if !strings.Contains(s, "hma_crossover|BUY|NIFTYCE") || !strings.Contains(s, "hma_crossover|BUY|NIFTYPE") {
 			t.Errorf("want Buy CE and Buy PE on every cross, got %s", s)
 		}
+	}
+	if strings.Contains(string(up), "26100") {
+		t.Errorf("an ATM cross shows the +100 strike's buttons: %s", up)
+	}
+	pe1 := market.Option(market.NFO, "NIFTY", d, market.Rupees(26100), market.Put, 65)
+	if s, _ := json.Marshal(hmaCrossButtons(st, paper.Cross{Instrument: pe1, Up: true})); !strings.Contains(string(s), "BUY|NIFTY26100CE") ||
+		!strings.Contains(string(s), "BUY|NIFTY26100PE") || strings.Count(string(s), `"type":"button"`) != 2 {
+		t.Errorf("+100 cross: want its CE and PE buys, got %s", s)
+	}
+	if got := hmaCrossLegSymbol(st, paper.Cross{Instrument: pe1}); got != "NIFTY26100PE" {
+		t.Errorf("+100 PE leg symbol %q", got)
 	}
 	if strings.Count(string(up), `"type":"button"`) != 2 || strings.Contains(string(up), "SELL") {
 		t.Errorf("up-cross: want just the two buys, got %s", up)
