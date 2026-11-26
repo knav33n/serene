@@ -1,4 +1,8 @@
-# pdl_swing_day (forward test)
+# pdl_swing_day (stopped)
+
+**Stopped 2026-11-26:** the forward signals (`serene paper pdlswing`, the
+`serene-pdl` timer on hearth) were removed. The research command and the rules
+in `internal/paper/pdlswing.go` remain.
 
 Frozen on 2026-11-12 from `serene research pdlswing`, variant `cap400/day`. The
 source is the r/NSEbets post "Holy grail of options buying" (puts only, buy the
@@ -40,13 +44,5 @@ passes if:
 - PF ≥ 1.2, and
 - net is not negative at 2× slippage.
 
-## Running
-`serene paper pdlswing [--slack] [--date DATE]` posts the buy and the sell once
-each to `SLACK_PDL_CHANNEL` (C0CH4E87RNW). Closed trades are appended to
-`reports/paper_pdlswing.csv`, and the day's decisions are kept in
-`data/paper/pdl-<date>.json`. hearth runs it 20 s past each minute,
-09:00–15:59 IST on weekdays (`serene-pdl.timer`). It needs that morning's Kite
-login in project_calm.
-
-Code: `internal/paper/pdlswing.go` (rules, tested), `cmd/serene/pdlpaper.go`;
+Code: `internal/paper/pdlswing.go` (rules, tested);
 research in `cmd/serene/pdlswing.go`.

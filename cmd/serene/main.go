@@ -108,11 +108,9 @@ const usage = `serene researches and trades Indian index options.
 
   serene paper hmacross       [--slack [--fyers] [--zerodha]] [--date DATE] [--warm 4] [--sizes]   (hma_crossover: 10m HMA 13/34 up-crosses of the ATM NIFTY and SENSEX CE/PE, with Zerodha buttons; --fyers/--zerodha buy the first 2 near-HMA pullbacks of each index a day, sold at +2%; --sizes prints what each broker would buy now)
   serene slack delete         --channel NAME [--yes]   (delete the app's own messages and thread replies in a channel; counts only without --yes)
-  serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
 
 Not built yet:
   serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
-  serene forward emasma       [--fetch] [--slack]   (silent 30m EMA13/SMA34 GOLDM+SILVERM forward test; Slack once, at 100 trades each)
   serene forward buttons-test [--strategy goldm_hma_1h] [--side buy] [--channel ID]   (post a test futures button; click them against serene manual --slack --slack-dry-run)
   serene live jade            [--slack] [--check] [--decide-at 15:20] [--buffer 0.02]   (NIFTY Jade Lizard, ~200 credit, 1 lot on Zerodha NRML; 50% take profit, exit at 21 days)
   serene live stbt            [--slack] [--check] [--only nifty|sensex]   (1DTE ATM straddles, STBT: NIFTY 13:00 W&T −5 / SENSEX 11:00 W&T −10, SL 40% trail 20/10, re-entry at cost; 1 lot each on Zerodha NRML)
@@ -286,8 +284,6 @@ func run(ctx context.Context, args []string) error {
 		return runFyers(ctx, args[1], rest)
 	case "forward signals":
 		return runForwardSignals(ctx, rest)
-	case "forward emasma":
-		return runForwardEMASMA(ctx, rest)
 	case "slack delete":
 		return runSlackDelete(ctx, rest)
 	case "paper hmacross":
@@ -298,8 +294,6 @@ func run(ctx context.Context, args []string) error {
 		return runLiveSTBT(ctx, rest)
 	case "live mcx":
 		return runLiveMCX(ctx, rest)
-	case "paper pdlswing":
-		return runPDLPaper(ctx, rest)
 	case "prod paper", "prod live":
 		return fmt.Errorf("%q is not built yet", cmd)
 	}
