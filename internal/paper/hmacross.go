@@ -10,10 +10,14 @@ import (
 )
 
 // HMACrossName is the crossover signal's name in messages and records. It
-// replaced nifty_hma_retest on 2026-11-22: signals only, no orders.
-const HMACrossName = "nifty_hma_crossover"
+// replaced nifty_hma_retest on 2026-11-22; it was nifty_hma_crossover until
+// SENSEX was added on 2026-11-26.
+const HMACrossName = "hma_crossover"
 
-// CrossConfig sets nifty_hma_crossover's rules.
+// HMACrossOldName is the name on buttons posted before 2026-11-26.
+const HMACrossOldName = "nifty_hma_crossover"
+
+// CrossConfig sets hma_crossover's rules.
 type CrossConfig struct {
 	Day        market.Date
 	Fast, Slow int              // Hull moving averages of closes

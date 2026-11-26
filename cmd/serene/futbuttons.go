@@ -86,7 +86,7 @@ func futButtons(cl *clients, logf func(string, ...any), dryRun bool) (*manual.Sl
 				return "", err
 			}
 			switch o.Strategy {
-			case paper.HMACrossName:
+			case paper.HMACrossName, paper.HMACrossOldName:
 				return placeOpt(ctx, kc, o, time.Now(), dryRun)
 			}
 			return placeFut(ctx, kc, o, time.Now(), dryRun)

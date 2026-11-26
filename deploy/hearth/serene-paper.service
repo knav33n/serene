@@ -1,5 +1,5 @@
 [Unit]
-Description=serene nifty_hma_crossover: 10m HMA 13/34 crosses of the ATM NIFTY CE/PE, to Slack with buy/sell buttons; squares off the buttons' buys on a down-cross
+Description=serene hma_crossover: 10m HMA 13/34 up-crosses of the ATM NIFTY and SENSEX CE/PE, to Slack with buy buttons; buys the first 2 near-HMA pullbacks of each index a day on Fyers (all free cash) and Zerodha (₹1L), sold at a 2% target
 Wants=network-online.target
 After=network-online.target postgresql.service
 
@@ -8,5 +8,5 @@ Type=oneshot
 User=serene
 Group=serene
 WorkingDirectory=/home/serene/app
-ExecStart=/home/serene/app/serene paper hmacross --slack --exit --fyers
+ExecStart=/home/serene/app/serene paper hmacross --slack --fyers --zerodha
 TimeoutStartSec=5min

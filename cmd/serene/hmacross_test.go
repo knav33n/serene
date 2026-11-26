@@ -120,67 +120,63 @@ func TestHMACrossButtonsDedicated(t *testing.T) {
 	up, _ := json.Marshal(hmaCrossButtons(st, paper.Cross{Instrument: pe, Up: true}))
 	down, _ := json.Marshal(hmaCrossButtons(st, paper.Cross{Instrument: pe, Up: false}))
 	for _, s := range []string{string(up), string(down)} {
-		if !strings.Contains(s, "nifty_hma_crossover|BUY|NIFTYCE") || !strings.Contains(s, "nifty_hma_crossover|BUY|NIFTYPE") {
+		if !strings.Contains(s, "hma_crossover|BUY|NIFTYCE") || !strings.Contains(s, "hma_crossover|BUY|NIFTYPE") {
 			t.Errorf("want Buy CE and Buy PE on every cross, got %s", s)
 		}
 	}
 	if strings.Count(string(up), `"type":"button"`) != 2 || strings.Contains(string(up), "SELL") {
 		t.Errorf("up-cross: want just the two buys, got %s", up)
 	}
-	if strings.Count(string(down), `"type":"button"`) != 3 || !strings.Contains(string(down), "nifty_hma_crossover|SELL|NIFTYPE") ||
+	if strings.Count(string(down), `"type":"button"`) != 3 || !strings.Contains(string(down), "hma_crossover|SELL|NIFTYPE") ||
 		strings.Contains(string(down), "SELL|NIFTYCE") {
 		t.Errorf("down-cross on the PE: want the buys and Sell PE, got %s", down)
 	}
 }
 
-type fakeExitKite struct {
-	fakeOptKite
-	orders []kite.Order
-}
-
-func (f *fakeExitKite) Orders(context.Context) ([]kite.Order, error) { return f.orders, nil }
-
-func TestHMACrossExitSellsOnlyTheButtonsBuys(t *testing.T) {
-	now := time.Date(2026, 11, 23, 14, 35, 20, 0, market.IST)
-	sym := "NIFTY26NOV25900PE"
-	o := func(side, tag string, filled int64) kite.Order {
-		return kite.Order{Symbol: sym, Exchange: "NFO", Product: "MIS", Side: side, Tag: tag, Filled: filled, Status: "COMPLETE"}
+func TestPlaceOptSensex(t *testing.T) {
+	now := time.Date(2026, 11, 26, 10, 0, 0, 0, market.IST)
+	exp := market.Date{Year: 2026, Month: time.November, Day: 27}
+	var asked string
+	f := &fakeOptKite{
+		ins: []kite.Instrument{{Symbol: "SENSEX26N2785000CE", Name: "SENSEX", Type: "CE", Expiry: exp, LotSize: 20}},
+		pos: []kite.Position{{Symbol: "SENSEX26N2785000CE", Exchange: "BFO", Product: "MIS", Qty: 40}},
 	}
-	f := &fakeExitKite{orders: []kite.Order{
-		o("BUY", "slack1123123219", 65),
-		o("BUY", "slack1123130000", 130),
-		o("SELL", "slack1123131000", 65), // a Sell button click
-		o("BUY", "serenemanual", 650),    // the manual desk's: not ours
-		{Symbol: sym, Exchange: "NFO", Product: "NRML", Side: "BUY", Tag: "slack1123123000", Filled: 65},
-	}}
-	f.pos = []kite.Position{{Symbol: sym, Exchange: "NFO", Product: "MIS", Qty: 780}}
 	ctx := context.Background()
-	msg, err := hmaCrossExit(ctx, f, sym, now)
-	if err != nil {
+	buy := manual.FutOrder{Strategy: paper.HMACrossName, Side: market.Buy, Symbol: "SENSEX26N2785000CE"}
+	if _, err := placeOpt(ctx, &askKite{f, &asked}, buy, now, false); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.placed) != 1 {
-		t.Fatalf("placed %+v", f.placed)
+	if asked != "BFO" {
+		t.Errorf("instruments of %q, want BFO", asked)
 	}
-	if p := f.placed[0]; p.Side != "SELL" || p.Qty != 130 || p.Type != "MARKET" || p.Product != "MIS" || !strings.HasPrefix(p.Tag, hmaCrossExitTag) {
-		t.Errorf("sell %+v: want 130 = 65+130−65 at market", p)
+	sell := buy
+	sell.Side = market.Sell
+	if _, err := placeOpt(ctx, f, sell, now, false); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(msg, "square-off") {
-		t.Errorf("message %q", msg)
+	if b := f.placed[0]; b.Exchange != "BFO" || b.Qty != 20 || b.Side != "BUY" {
+		t.Errorf("buy %+v", b)
 	}
-	// Held less than bought (sold on Kite by hand): only what's held.
-	f.placed, f.pos = nil, []kite.Position{{Symbol: sym, Exchange: "NFO", Product: "MIS", Qty: 65}}
-	if _, err := hmaCrossExit(ctx, f, sym, now); err != nil || len(f.placed) != 1 || f.placed[0].Qty != 65 {
-		t.Errorf("want 65 sold, got %+v %v", f.placed, err)
+	if s := f.placed[1]; s.Exchange != "BFO" || s.Qty != 40 || s.Side != "SELL" {
+		t.Errorf("sell %+v", s)
 	}
-	// Nothing held, or only the desk's: nothing placed.
-	f.placed, f.pos = nil, nil
-	if msg, err := hmaCrossExit(ctx, f, sym, now); err != nil || msg != "" || len(f.placed) != 0 {
-		t.Errorf("nothing held: %q %v %+v", msg, err, f.placed)
-	}
-	f.orders = []kite.Order{o("BUY", "serenemanual", 650)}
-	f.pos = []kite.Position{{Symbol: sym, Exchange: "NFO", Product: "MIS", Qty: 650}}
-	if _, err := hmaCrossExit(ctx, f, sym, now); err != nil || len(f.placed) != 0 {
-		t.Errorf("sold the desk's position: %+v %v", f.placed, err)
+}
+
+type askKite struct {
+	*fakeOptKite
+	asked *string
+}
+
+func (a *askKite) Instruments(ctx context.Context, exch string) ([]kite.Instrument, error) {
+	*a.asked = exch
+	return a.fakeOptKite.Instruments(ctx, exch)
+}
+
+func TestHMACrossTextSensex(t *testing.T) {
+	d := market.Date{Year: 2026, Month: time.November, Day: 26}
+	ce := market.Option(market.BFO, "SENSEX", d, market.Rupees(85000), market.Call, 20)
+	c := paper.Cross{Instrument: ce, Time: d.At(9, 25), End: d.At(9, 35), Up: true}
+	if s := hmaCrossText(c, paper.DefaultHMACross(d)); !strings.Contains(s, "hma_crossover* SENSEX 85000") {
+		t.Errorf("text %q", s)
 	}
 }

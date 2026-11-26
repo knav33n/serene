@@ -106,7 +106,7 @@ const usage = `serene researches and trades Indian index options.
 
   serene backup               [--dry-run] [--config configs/backup.yaml]   (mirror data/ and ~/INSIGHTS onto the Seagate drive; run at end of day)
 
-  serene paper hmacross       [--slack [--exit]] [--date DATE] [--step 100] [--warm 4]   (nifty_hma_crossover: every 10m HMA 13/34 cross of the ATM CE/PE, with Zerodha buttons; --exit squares off the buttons' buys on a down-cross)
+  serene paper hmacross       [--slack [--fyers] [--zerodha]] [--date DATE] [--warm 4] [--sizes]   (hma_crossover: 10m HMA 13/34 up-crosses of the ATM NIFTY and SENSEX CE/PE, with Zerodha buttons; --fyers/--zerodha buy the first 2 near-HMA pullbacks of each index a day, sold at +2%; --sizes prints what each broker would buy now)
   serene slack delete         --channel NAME [--yes]   (delete the app's own messages and thread replies in a channel; counts only without --yes)
   serene paper pdlswing       [--slack] [--date DATE] [--from 2026-11-13]   (pdl_swing_day forward signals; no P&L)
 
@@ -275,6 +275,10 @@ func run(ctx context.Context, args []string) error {
 		return runMCXFetch(ctx, rest)
 	case "etf fetch":
 		return runETFFetch(ctx, rest)
+	case "fyers tick":
+		return runFyersTick(ctx, rest)
+	case "fyers mcxopt":
+		return runFyersMCXOpt(ctx, rest)
 	case "fyers mcx":
 		return runFyersMCX(ctx, rest)
 	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot", "fyers lots", "fyers all":
