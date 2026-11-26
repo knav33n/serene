@@ -1,0 +1,15 @@
+[Unit]
+Description=serene stbt, one pass a minute through the trading day
+
+[Timer]
+# Entries: NIFTY 13:00, SENSEX 11:00 on the day before expiry; exits 15:15 on the
+# expiry. Stops and triggers are exchange DAY orders, placed again from 09:15;
+# runs after the 15:40 close see the day's last fills and post the overnight mark.
+# A run with nothing working and outside an entry window makes no Kite calls.
+# Holidays are caught by the command.
+OnCalendar=Mon..Fri *-*-* 09..15:*:20 Asia/Kolkata
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

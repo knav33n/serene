@@ -1,0 +1,92 @@
+# Market-moving event days for optbt's skip_events, as the Indian trading day
+# that takes the hit. kind: budget, rbi (MPC decision day), election (results
+# or exit-poll reaction), fomc (US decision lands ~23:30–00:30 IST, so the
+# entry here is the next Indian trading day).
+# Sources: RBI MPC calendars; Fed FOMC calendars; FY27 RBI dates per RBI's
+# 2026-03-23 calendar (5paisa/angelone summaries), checked 2026-11-26.
+date,kind,note
+2022-02-01,budget,Union Budget FY23
+2023-02-01,budget,Union Budget FY24
+2024-02-01,budget,Interim Budget FY25
+2024-07-23,budget,Union Budget FY25
+2025-02-01,budget,Union Budget FY26 (Saturday session)
+2026-02-01,budget,Union Budget FY27 (Sunday session)
+2022-02-10,rbi,
+2022-04-08,rbi,
+2022-05-04,rbi,off-cycle hike
+2022-06-08,rbi,
+2022-08-05,rbi,
+2022-09-30,rbi,
+2022-12-07,rbi,
+2023-02-08,rbi,
+2023-04-06,rbi,
+2023-06-08,rbi,
+2023-08-10,rbi,
+2023-10-06,rbi,
+2023-12-08,rbi,
+2024-02-08,rbi,
+2024-04-05,rbi,
+2024-06-07,rbi,
+2024-08-08,rbi,
+2024-10-09,rbi,
+2024-12-06,rbi,
+2025-02-07,rbi,
+2025-04-09,rbi,
+2025-06-06,rbi,
+2025-08-06,rbi,
+2025-10-01,rbi,
+2025-12-05,rbi,
+2026-02-06,rbi,
+2026-04-08,rbi,
+2026-06-05,rbi,
+2026-08-05,rbi,
+2026-10-07,rbi,
+2026-12-04,rbi,
+2022-03-10,election,UP/Punjab state results
+2022-12-08,election,Gujarat/HP state results
+2023-12-04,election,MP/Rajasthan/Chhattisgarh results (Sun 12-03)
+2024-06-03,election,Lok Sabha exit polls (Sat 06-01)
+2024-06-04,election,Lok Sabha results
+2024-11-06,election,US presidential result
+2024-11-25,election,Maharashtra results (Sat 11-23)
+2025-11-14,election,Bihar results
+2022-01-27,fomc,Jan 26
+2022-03-17,fomc,Mar 16
+2022-05-05,fomc,May 4
+2022-06-16,fomc,Jun 15
+2022-07-28,fomc,Jul 27
+2022-09-22,fomc,Sep 21
+2022-11-03,fomc,Nov 2
+2022-12-15,fomc,Dec 14
+2023-02-02,fomc,Feb 1
+2023-03-23,fomc,Mar 22
+2023-05-04,fomc,May 3
+2023-06-15,fomc,Jun 14
+2023-07-27,fomc,Jul 26
+2023-09-21,fomc,Sep 20
+2023-11-02,fomc,Nov 1
+2023-12-14,fomc,Dec 13
+2024-02-01,fomc,Jan 31
+2024-03-21,fomc,Mar 20
+2024-05-02,fomc,May 1
+2024-06-13,fomc,Jun 12
+2024-08-01,fomc,Jul 31
+2024-09-19,fomc,Sep 18
+2024-11-08,fomc,Nov 7
+2024-12-19,fomc,Dec 18
+2025-01-30,fomc,Jan 29
+2025-03-20,fomc,Mar 19
+2025-05-08,fomc,May 7
+2025-06-19,fomc,Jun 18
+2025-07-31,fomc,Jul 30
+2025-09-18,fomc,Sep 17
+2025-10-30,fomc,Oct 29
+2025-12-11,fomc,Dec 10
+2026-01-29,fomc,Jan 28
+2026-03-19,fomc,Mar 18
+2026-04-30,fomc,Apr 29
+2026-06-18,fomc,Jun 17
+2026-07-30,fomc,Jul 29
+2026-09-17,fomc,Sep 16
+2026-10-29,fomc,Oct 28
+2026-12-10,fomc,Dec 9

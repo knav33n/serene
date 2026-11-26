@@ -1,0 +1,12 @@
+[Unit]
+Description=serene stbt: NIFTY + SENSEX 1DTE ATM straddles carried overnight, one lot each live on Zerodha
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=serene
+Group=serene
+WorkingDirectory=/home/serene/app
+ExecStart=/home/serene/app/serene live stbt --slack
+TimeoutStartSec=3min

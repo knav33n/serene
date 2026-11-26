@@ -1,0 +1,25 @@
+# Short straddle/strangle grid for cmd/optbt: every list is a parameter and
+# cells are the full cross-product (less combinations that cannot differ).
+# Research window only; the 2025→ holdout is run once, on picked cells, with
+# --from 2025-01-01 --to <latest> --cells ...
+name: short_premium
+from: "2022-01-01"
+to: "2024-12-31"
+index: [NIFTY, SENSEX]
+dte: [0, 1, 2]                 # trading days to the nearest expiry
+side: [both]
+strike: [atm, otm100, otm200, cp100, cp50, cp25, sw0.5, cpsp25]
+round: [0, 100]                # 100 = only strikes that are multiples of 100
+entry: ["09:20", "09:30", "10:00", "11:00", "13:00"]
+exit: ["09:20", "14:30", "15:15"]  # 09:20 only applies to STBT (next day)
+hold: [intraday, stbt]
+wait: [0, -5, -10]             # W&T: sell after the premium falls this %
+sl: [0, 25, 40]                # per-leg stop, % of premium
+sl_mode: [leg, cost, all]      # cost = move the other leg's stop to entry; all = square off both
+trail: ["off", "10/5", "20/10"]  # every X% fall, lower the stop Y%
+reentry: [0, 1, 2]
+reentry_mode: [cost, reexec]
+hedge: [none, otm500, cp5]
+slip_bps: 30
+naked_margin_pct: 9
+mdd_max: 10
