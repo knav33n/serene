@@ -96,8 +96,8 @@ func TestHMANearTrade(t *testing.T) {
 	clock := d.At(10, 4).Add(20 * time.Second)
 	price := 100.0
 	var msgs []string
-	fy := &fakeNear{name: "fyers", cap: 500000, lot: 65}
-	zd := &fakeNear{name: "zerodha", cap: 1e6, max: nearZerodhaLots, lot: 65}
+	fy := &fakeNear{name: "fyers", cap: 500000, max: nearMaxLots, lot: 65}
+	zd := &fakeNear{name: "zerodha", cap: 1e6, max: nearMaxLots, lot: 65}
 	dep := nearDeps{
 		brokers: []nearBroker{fy, zd},
 		prices: func(_ context.Context, keys []string) (map[string]float64, error) {
@@ -119,9 +119,9 @@ func TestHMANearTrade(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Both brokers buy at market: Fyers 75 lots in 3 orders, Zerodha 1 lot.
+	// Both brokers buy 1 lot at market, however much cash there is.
 	run()
-	if got := strings.Join(fy.placed, ","); got != "BUY MARKET 1755 0.00,BUY MARKET 1755 0.00,BUY MARKET 1365 0.00" {
+	if got := strings.Join(fy.placed, ","); got != "BUY MARKET 65 0.00" {
 		t.Fatalf("fyers placed %s", got)
 	}
 	if got := strings.Join(zd.placed, ","); got != "BUY MARKET 65 0.00" {
@@ -130,17 +130,17 @@ func TestHMANearTrade(t *testing.T) {
 	// The same alert next minute isn't bought again.
 	clock = d.At(10, 5)
 	run()
-	if len(fy.placed) != 3 || len(zd.placed) != 1 {
+	if len(fy.placed) != 1 || len(zd.placed) != 1 {
 		t.Fatalf("bought twice: %v %v", fy.placed, zd.placed)
 	}
-	// The target is reached: LIMIT sells at 102, split at the freeze; they rest.
+	// The target is reached: LIMIT sells at 102; they rest.
 	price, clock = 102.3, d.At(10, 6)
 	run()
 	if got := strings.Join(zd.placed[1:], ","); got != "SELL LIMIT 65 102.00" {
 		t.Fatalf("zerodha sells %s", got)
 	}
-	if len(fy.placed) != 6 {
-		t.Fatalf("fyers sells %v", fy.placed[3:])
+	if got := strings.Join(fy.placed[1:], ","); got != "SELL LIMIT 65 102.00" {
+		t.Fatalf("fyers sells %s", got)
 	}
 	// They fill; a second alert (the PE) opens trade 2, a third is ignored.
 	fy.sellFills, zd.sellFills = true, true
@@ -167,7 +167,7 @@ func TestHMANearTrade(t *testing.T) {
 		t.Errorf("want a target-hit message per broker, got %q", msgs)
 	}
 	// SENSEX has its own two a day; a stale alert (after downtime) isn't bought.
-	sx := &fakeNear{name: "zerodha", cap: 1e6, max: nearZerodhaLots, lot: 20}
+	sx := &fakeNear{name: "zerodha", cap: 1e6, max: nearMaxLots, lot: 20}
 	dep.brokers, clock = []nearBroker{sx}, d.At(11, 30)
 	sst := &paperDayState{Day: d, Index: "SENSEX", Lot: 20, Strike: 85000, Legs: st.Legs}
 	sce := market.Option(market.BFO, "SENSEX", d, market.Rupees(85000), market.Call, 20)
@@ -199,7 +199,7 @@ func TestHMANearTradeOnePerContract(t *testing.T) {
 	}
 	var clock time.Time
 	var msgs []string
-	zd := &fakeNear{name: "zerodha", cap: 1e6, max: nearZerodhaLots, lot: 65, sellFills: true,
+	zd := &fakeNear{name: "zerodha", cap: 1e6, max: nearMaxLots, lot: 65, sellFills: true,
 		other: map[string]int64{"zerodha:NIFTYPE": 65}} // stbt's short ATM PE
 	price := 100.0
 	dep := nearDeps{brokers: []nearBroker{zd},

@@ -19,10 +19,9 @@ import (
 
 // The near-HMA auto trade (user, 2026-11-25; widened 2026-11-26): on a
 // fresh near-HMA alert, buy that leg at market, intraday, on Fyers and on
-// Zerodha, at most twice a day per index on each broker. Fyers buys with all
-// the free cash at that moment, Zerodha one lot (user, 2026-11-27; it was up to
-// ₹1L before). The server watches
-// the price and, once it reaches 2% over the fill, sells at a LIMIT of that
+// Zerodha, at most twice a day per index on each broker, one lot on each
+// (user, 2026-11-27; before, Fyers bought with all its free cash and Zerodha
+// with up to ₹1L). The server watches the price and, once it reaches 2% over the fill, sells at a LIMIT of that
 // target. No GTT, no resting target order, no stop loss. From 2026-11-27
 // (user): alerts come from the ATM and ±100 strikes, a contract is entered
 // at most once a day per broker, and never while that broker already holds
@@ -33,7 +32,7 @@ const (
 	nearMaxAge      = 3 * time.Minute // a near-HMA minute older than this isn't bought
 	nearLastEntry   = 15 * 60         // minutes since midnight: no buys from 15:00
 	nearPerDay      = 2               // trades a day per index per broker
-	nearZerodhaLots = 1               // lots per Zerodha trade (user, 2026-11-27)
+	nearMaxLots     = 1               // lots per trade on each broker (user, 2026-11-27)
 	nearFundsUse    = 0.98            // of the cap, leaving room for charges and the move since the quote
 	nearWatch       = 35 * time.Second
 	nearPollEvery   = 3 * time.Second
@@ -520,7 +519,7 @@ func kiteLast(ctx context.Context, kc *kite.Client, keys []string) (map[string]f
 	return out, nil
 }
 
-// fyersNear trades on Fyers, INTRADAY, with all the free cash.
+// fyersNear trades on Fyers, INTRADAY, one lot a trade.
 type fyersNear struct {
 	f      *lazyFyers
 	master map[string][]fyers.MasterRow
@@ -530,7 +529,7 @@ func (*fyersNear) Name() string { return "fyers" }
 
 func (b *fyersNear) Cap(ctx context.Context) (float64, error) { return b.f.Funds(ctx) }
 
-func (*fyersNear) MaxLots() int64 { return 0 }
+func (*fyersNear) MaxLots() int64 { return nearMaxLots }
 
 func (b *fyersNear) Ticker(ctx context.Context, x hmaIndex, st *paperDayState, leg paperLeg) (string, int64, error) {
 	if b.master == nil {
@@ -625,7 +624,7 @@ func (b *kiteNear) Cap(ctx context.Context) (float64, error) {
 	return f, nil
 }
 
-func (*kiteNear) MaxLots() int64 { return nearZerodhaLots }
+func (*kiteNear) MaxLots() int64 { return nearMaxLots }
 
 func (b *kiteNear) Ticker(_ context.Context, x hmaIndex, st *paperDayState, leg paperLeg) (string, int64, error) {
 	if leg.Symbol == "" {

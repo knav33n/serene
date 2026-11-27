@@ -37,7 +37,7 @@ func runHMACross(ctx context.Context, args []string) error {
 	tsPath := fs.String("ts", "data/hmacross_ts.json", "Slack ts of each posted cross, for near-HMA thread replies")
 	alertPath := fs.String("alert", "data/hmacross_alert.json", "whether a failure has been posted")
 	warm := fs.Int("warm", 4, "prior trading days of bars to warm the averages")
-	fyersTrade := fs.Bool("fyers", false, "with --slack: buy fresh near-HMA alerts on Fyers with all free cash, 2 a day per index, sold at a 2% target (REAL orders)")
+	fyersTrade := fs.Bool("fyers", false, "with --slack: buy fresh near-HMA alerts on Fyers 1 lot, 2 a day per index, sold at a 2% target (REAL orders)")
 	zerodhaTrade := fs.Bool("zerodha", false, "with --slack: buy fresh near-HMA alerts on Zerodha with up to ₹1L each, 2 a day per index, sold at a 2% target (REAL orders)")
 	nearDir := fs.String("near-dir", "data/hmanear", "the near-HMA trades' state, a file per day, index and broker")
 	sizes := fs.Bool("sizes", false, "print what each broker would buy of each index's legs now, with live funds; no orders")
