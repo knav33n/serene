@@ -26,6 +26,9 @@ import (
 // after the 09:15 bar closes; no guessing strikes before the open, user
 // 2026-11-27), so a trade's file already holds the ticks before its buy.
 // Nothing goes to Slack (user, 2026-11-27): the files stay on hearth.
+// Every day it also records the NIFTY 50 index and NIFTY's nearest
+// unexpired future (user, 2026-11-27) from when it connects, 09:14; an
+// index row has only recv_time, exch_time and ltp.
 const (
 	tickStart = 9*60 + 14
 	tickEnd   = 15*60 + 31
@@ -96,9 +99,29 @@ func tickContracts(d market.Date, paperDir string) (map[int64]tickContract, erro
 	return out, nil
 }
 
+// niftyIndexQuote is the NIFTY 50 index's tick file name.
+const niftyIndexQuote = "NSE:NIFTY 50"
+
+// tickFixed is the contracts recorded every day: the NIFTY 50 index and
+// NIFTY's nearest future not expired by d.
+func tickFixed(ins []kite.Instrument, d market.Date) map[int64]tickContract {
+	out := map[int64]tickContract{niftyIndexToken: {quote: niftyIndexQuote}}
+	var fut kite.Instrument
+	for _, i := range ins {
+		if i.Exchange == "NFO" && i.Type == "FUT" && i.Name == "NIFTY" && !i.Expiry.Before(d) &&
+			(fut.Token == 0 || i.Expiry.Before(fut.Expiry)) {
+			fut = i
+		}
+	}
+	if fut.Token != 0 {
+		out[fut.Token] = tickContract{quote: "NFO:" + fut.Symbol}
+	}
+	return out
+}
+
 // tickPath is the day's tick file of quote (EXCHANGE:SYMBOL).
 func tickPath(dir string, d market.Date, quote string) string {
-	return filepath.Join(dir, d.String(), strings.ReplaceAll(quote, ":", "_")+".csv")
+	return filepath.Join(dir, d.String(), strings.NewReplacer(":", "_", " ", "_").Replace(quote)+".csv")
 }
 
 type tickFile struct {
@@ -114,6 +137,11 @@ func recordTicks(ctx context.Context, d market.Date, dir, paperDir string) error
 	if err != nil {
 		return err
 	}
+	ins, err := kc.Instruments(ctx, "NFO")
+	if err != nil {
+		return fmt.Errorf("kite NFO instruments: %w", err)
+	}
+	fixed := tickFixed(ins, d)
 	t, err := kite.DialTicker(ctx, kite.TickerURL, kc.APIKey, kc.Token)
 	if err != nil {
 		return err
@@ -158,6 +186,9 @@ func recordTicks(ctx context.Context, d market.Date, dir, paperDir string) error
 		cs, err := tickContracts(d, paperDir)
 		if err != nil {
 			return err
+		}
+		for tok, c := range fixed {
+			cs[tok] = c
 		}
 		var add []int64
 		for tok, c := range cs {

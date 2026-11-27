@@ -20,8 +20,13 @@ func TestParseTicks(t *testing.T) {
 	put(68, 26990)
 	put(64+60, 195) // best ask qty
 	put(68+60, 27000)
-	msg := []byte{0, 3}
-	for _, p := range [][]byte{full, make([]byte, 32), full[:tickLTP]} { // full, an index packet, ltp
+	index := make([]byte, tickIndexFull)
+	binary.BigEndian.PutUint32(index[0:], 256265)
+	binary.BigEndian.PutUint32(index[4:], 2650015) // ₹26500.15
+	binary.BigEndian.PutUint32(index[8:], 2660000)
+	binary.BigEndian.PutUint32(index[28:], 1764131402)
+	msg := []byte{0, 4}
+	for _, p := range [][]byte{full, index, full[:tickLTP], make([]byte, 50)} { // full, an index packet, ltp, unknown
 		msg = binary.BigEndian.AppendUint16(msg, uint16(len(p)))
 		msg = append(msg, p...)
 	}
@@ -29,8 +34,8 @@ func TestParseTicks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 2 {
-		t.Fatalf("want 2 ticks, got %+v", ts)
+	if len(ts) != 3 {
+		t.Fatalf("want 3 ticks, got %+v", ts)
 	}
 	a := ts[0]
 	if a.Token != 12345 || a.LTP != 269.95 || a.LastQty != 65 || a.Volume != 1000 || a.OI != 777 ||
@@ -38,7 +43,10 @@ func TestParseTicks(t *testing.T) {
 		!a.Exchange.Equal(time.Unix(1764131401, 0)) || !a.LastTrade.Equal(time.Unix(1764131400, 0)) {
 		t.Errorf("full tick %+v", a)
 	}
-	if b := ts[1]; b.Token != 12345 || b.LTP != 269.95 || b.Volume != 0 {
+	if x := ts[1]; x.Token != 256265 || x.LTP != 26500.15 || x.High != 26600 || !x.Exchange.Equal(time.Unix(1764131402, 0)) {
+		t.Errorf("index tick %+v", x)
+	}
+	if b := ts[2]; b.Token != 12345 || b.LTP != 269.95 || b.Volume != 0 {
 		t.Errorf("ltp tick %+v", b)
 	}
 	if ts, err := ParseTicks([]byte{0}); err != nil || ts != nil {

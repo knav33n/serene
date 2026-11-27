@@ -45,3 +45,21 @@ func TestTickWindow(t *testing.T) {
 		t.Fatalf("file %q", lines)
 	}
 }
+
+func TestTickFixed(t *testing.T) {
+	d := market.Date{Year: 2026, Month: time.November, Day: 27}
+	ins := []kite.Instrument{
+		{Token: 1, Exchange: "NFO", Type: "FUT", Name: "NIFTY", Symbol: "NIFTY26DECFUT", Expiry: market.Date{Year: 2026, Month: time.December, Day: 29}},
+		{Token: 2, Exchange: "NFO", Type: "FUT", Name: "NIFTY", Symbol: "NIFTY26NOVFUT", Expiry: d},
+		{Token: 3, Exchange: "NFO", Type: "FUT", Name: "NIFTY", Symbol: "NIFTY26OCTFUT", Expiry: market.Date{Year: 2026, Month: time.October, Day: 27}},
+		{Token: 4, Exchange: "NFO", Type: "FUT", Name: "BANKNIFTY", Symbol: "BANKNIFTY26NOVFUT", Expiry: d},
+		{Token: 5, Exchange: "NFO", Type: "CE", Name: "NIFTY", Symbol: "NIFTY26NOV26000CE", Expiry: d},
+	}
+	got := tickFixed(ins, d)
+	if len(got) != 2 || got[niftyIndexToken].quote != "NSE:NIFTY 50" || got[2].quote != "NFO:NIFTY26NOVFUT" {
+		t.Errorf("fixed %+v", got)
+	}
+	if p := tickPath("x", d, niftyIndexQuote); filepath.Base(p) != "NSE_NIFTY_50.csv" {
+		t.Errorf("index path %s", p)
+	}
+}

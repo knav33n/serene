@@ -16,7 +16,9 @@ import (
 // TickerURL is Kite's market data websocket.
 const TickerURL = "wss://ws.kite.trade"
 
-// Tick is one full-mode tick of a tradable (non-index) instrument. Kite
+// Tick is one tick. Of a tradable instrument it is Kite's full-mode
+// snapshot; of an index only LTP, Open/High/Low/Close and (full mode)
+// Exchange are set. Kite
 // sends a snapshot about once a second per instrument while it trades, not
 // every trade; LastQty and LastTrade are the latest trade's.
 type Tick struct {
@@ -40,11 +42,14 @@ const (
 	tickLTP   = 8
 	tickQuote = 44
 	tickFull  = 184
+	// An index's quote and full packets (its ltp packet is tickLTP).
+	tickIndexQuote = 28
+	tickIndexFull  = 32
 )
 
 // ParseTicks decodes one binary message: a count, then each packet's length
-// and bytes. A 1-byte heartbeat is no ticks. Packets of other sizes (index
-// ticks) are skipped. Prices come in paise.
+// and bytes. A 1-byte heartbeat is no ticks.
+// Packets of other sizes are skipped. Prices come in paise.
 func ParseTicks(b []byte) ([]Tick, error) {
 	if len(b) < 2 {
 		return nil, nil
@@ -62,11 +67,22 @@ func ParseTicks(b []byte) ([]Tick, error) {
 		}
 		p := b[2 : 2+size]
 		b = b[2+size:]
-		if size != tickLTP && size != tickQuote && size != tickFull {
-			continue
-		}
 		i32 := func(at int) int64 { return int64(int32(binary.BigEndian.Uint32(p[at:]))) }
 		px := func(at int) float64 { return float64(i32(at)) / 100 }
+		switch size {
+		case tickLTP, tickQuote, tickFull:
+		case tickIndexQuote, tickIndexFull:
+			t := Tick{Token: i32(0), LTP: px(4), High: px(8), Low: px(12), Open: px(16), Close: px(20)}
+			if size == tickIndexFull {
+				if s := i32(28); s > 0 {
+					t.Exchange = time.Unix(s, 0)
+				}
+			}
+			out = append(out, t)
+			continue
+		default:
+			continue
+		}
 		t := Tick{Token: i32(0), LTP: px(4)}
 		if size >= tickQuote {
 			t.LastQty, t.Avg, t.Volume = i32(8), px(12), i32(16)
