@@ -4,10 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/csv"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,10 +24,15 @@ import (
 // data/paper, ATM and ±100 CE/PE of each index) into
 // data/ticks/<day>/<EXCHANGE>_<SYMBOL>.csv. Every watched contract is
 // recorded from the open, so a trade's file already holds the ticks before
-// its buy; hmanear cuts the trade's window out and sends it to Slack.
+// its buy. Nothing goes to Slack (user, 2026-11-27): the files stay on hearth.
 const (
 	tickStart = 9*60 + 14
 	tickEnd   = 15*60 + 31
+	// tickBandSteps: the strikes each side of the index's pre-open price
+	// recorded from 09:14. hma_crossover's day file, and so its contracts,
+	// only exists after the 09:15 bar closes (its 09:16:20 run), which left
+	// the first minute and a half of 2026-11-27 unrecorded.
+	tickBandSteps = 3
 )
 
 // tickHeader is the recorder's CSV columns. Times are IST.
@@ -96,6 +100,45 @@ func tickContracts(d market.Date, paperDir string) (map[int64]tickContract, erro
 	return out, nil
 }
 
+// tickBand is, for each index without a day file yet, its nearest-expiry
+// CE and PE within tickBandSteps strikes of its price now (at 09:14 the
+// pre-open price, which the 09:15 open, and so the day's ATM, is close to).
+func tickBand(ctx context.Context, kc *kite.Client, d market.Date, paperDir string) (map[int64]tickContract, error) {
+	out := map[int64]tickContract{}
+	for _, x := range hmaIndices {
+		name := "day-" + d.String() + ".json"
+		if x.Name != "NIFTY" {
+			name = "day-" + x.Name + "-" + d.String() + ".json"
+		}
+		if _, err := os.Stat(filepath.Join(paperDir, name)); err == nil {
+			continue
+		}
+		key := stbtIndexKey[x.Name]
+		px, err := kiteLast(ctx, kc, []string{key})
+		if err != nil || px[key] <= 0 {
+			return out, fmt.Errorf("%s price: %v", x.Name, err)
+		}
+		atm := math.Round(px[key]/x.Step) * x.Step
+		ins, err := kc.Instruments(ctx, string(x.Exchange))
+		if err != nil {
+			return out, fmt.Errorf("%s instruments: %w", x.Exchange, err)
+		}
+		var exp market.Date
+		for _, in := range ins {
+			if in.Name == x.Name && (in.Type == "CE" || in.Type == "PE") && !in.Expiry.Before(d) && (exp.IsZero() || in.Expiry.Before(exp)) {
+				exp = in.Expiry
+			}
+		}
+		for _, in := range ins {
+			if in.Name == x.Name && in.Expiry == exp && (in.Type == "CE" || in.Type == "PE") &&
+				math.Abs(in.Strike-atm) <= tickBandSteps*x.Step+0.5 {
+				out[in.Token] = tickContract{quote: string(x.Exchange) + ":" + in.Symbol}
+			}
+		}
+	}
+	return out, nil
+}
+
 // tickPath is the day's tick file of quote (EXCHANGE:SYMBOL).
 func tickPath(dir string, d market.Date, quote string) string {
 	return filepath.Join(dir, d.String(), strings.ReplaceAll(quote, ":", "_")+".csv")
@@ -150,6 +193,10 @@ func recordTicks(ctx context.Context, d market.Date, dir, paperDir string) error
 		}
 	}()
 	contracts := map[int64]tickContract{}
+	band, err := tickBand(ctx, kc, d, paperDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ticks: strikes around the open:", err)
+	}
 	check := time.NewTicker(15 * time.Second)
 	defer check.Stop()
 	flush := time.NewTicker(2 * time.Second)
@@ -158,6 +205,9 @@ func recordTicks(ctx context.Context, d market.Date, dir, paperDir string) error
 		cs, err := tickContracts(d, paperDir)
 		if err != nil {
 			return err
+		}
+		for tok, c := range band {
+			cs[tok] = c
 		}
 		var add []int64
 		for tok, c := range cs {
@@ -247,53 +297,6 @@ func tickRow(recv time.Time, t kite.Tick) []string {
 	n := func(q int64) string { return strconv.FormatInt(q, 10) }
 	return []string{ts(recv), ts(t.Exchange), px(t.LTP), n(t.LastQty), ts(t.LastTrade), n(t.Volume), px(t.Avg), n(t.OI),
 		px(t.Bid), n(t.BidQty), px(t.Ask), n(t.AskQty)}
-}
-
-// tickWindow is the header and the rows of a tick file received in
-// [from, to], with the lowest and highest LTP received from low onwards.
-type tickWindow struct {
-	rows      [][]string
-	low, high float64
-}
-
-func readTickWindow(path string, from, to, after time.Time) (tickWindow, error) {
-	var w tickWindow
-	f, err := os.Open(path)
-	if err != nil {
-		return w, err
-	}
-	defer f.Close()
-	r := csv.NewReader(bufio.NewReader(f))
-	r.FieldsPerRecord = -1
-	head, err := r.Read()
-	if err != nil {
-		return w, fmt.Errorf("%s: %w", path, err)
-	}
-	w.rows = append(w.rows, head)
-	for {
-		rec, err := r.Read()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			// A row cut by a crash mid-write: skip it.
-			continue
-		}
-		at, err := time.ParseInLocation(tickTimeFmt, rec[0], market.IST)
-		if err != nil || at.Before(from) || at.After(to) {
-			continue
-		}
-		w.rows = append(w.rows, rec)
-		if len(rec) > 2 && !at.Before(after) {
-			if p, err := strconv.ParseFloat(rec[2], 64); err == nil && p > 0 {
-				if w.low == 0 || p < w.low {
-					w.low = p
-				}
-				w.high = max(w.high, p)
-			}
-		}
-	}
-	return w, nil
 }
 
 func probeTicks(ctx context.Context, wait time.Duration, paperDir string) error {

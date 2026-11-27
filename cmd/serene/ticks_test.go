@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,14 +37,11 @@ func TestTickWindow(t *testing.T) {
 	write(px, []time.Time{at(10, 2, 0), at(10, 3, 0), at(10, 4, 0)})
 	// A restart appends without a second header.
 	write(px, []time.Time{at(10, 4, 30), at(10, 6, 0), at(10, 9, 0)})
-	w, err := readTickWindow(path, at(10, 3, 0), at(10, 6, 5), at(10, 4, 0))
+	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(w.rows) != 5 || w.rows[0][0] != "recv_time" || w.rows[1][2] != "100.00" {
-		t.Fatalf("rows %v", w.rows)
-	}
-	if w.low != 96.5 || w.high != 102.1 {
-		t.Errorf("after the buy: low %v high %v", w.low, w.high)
+	if lines := strings.Split(strings.TrimSpace(string(b)), "\n"); len(lines) != 7 || lines[0] != strings.Join(tickHeader, ",") {
+		t.Fatalf("file %q", lines)
 	}
 }
