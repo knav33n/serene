@@ -5,26 +5,21 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"serene/internal/fyers"
 	"serene/internal/kite"
-	"serene/internal/manual"
 	"serene/internal/market"
 	"serene/internal/paper"
 	"serene/internal/slack"
 )
 
-// hmaCrossMaxAge: an older cross (a backfill after downtime) is posted
-// without order buttons.
-const hmaCrossMaxAge = 15 * time.Minute
-
 // runHMACross posts hma_crossover's signals: each run fetches the day's ATM,
 // ATM−100 and ATM+100 CE and PE minute bars of NIFTY and SENSEX from Kite, builds 10-minute bars,
-// and posts every HMA 13/34 up-cross of the day not yet posted, with Zerodha
-// buy buttons for both legs, and each near-HMA pullback after one. With
+// and posts every HMA 13/34 up-cross of the day not yet posted and each
+// near-HMA pullback after one, as plain messages (no order buttons, user
+// 2026-11-27). With
 // --fyers and --zerodha, the first two fresh pullbacks of each index a day
 // are bought on that broker and sold at a 2% target: one entry per contract,
 // none in a contract another strategy holds.
@@ -193,7 +188,6 @@ func postHMACrosses(ctx context.Context, client *slack.Client, channel string, s
 	if _, err := readJSONFile(tsPath, &tss); err != nil {
 		return err
 	}
-	buttons := os.Getenv("SLACK_ORDER_USERS") != ""
 	fresh := 0
 	for _, c := range crosses {
 		id := hmaCrossID(c)
@@ -206,14 +200,7 @@ func postHMACrosses(ctx context.Context, client *slack.Client, channel string, s
 		if client == nil {
 			continue
 		}
-		recent := now.Sub(c.End) <= hmaCrossMaxAge
-		blocks := []slack.Block{slack.SectionBlock(text)}
-		if buttons && recent {
-			if row := hmaCrossButtons(st, c); row != nil {
-				blocks = append(blocks, row)
-			}
-		}
-		ts, err := client.PostBlocks(ctx, channel, text, blocks)
+		ts, err := client.PostBlocks(ctx, channel, text, []slack.Block{slack.SectionBlock(text)})
 		if err != nil {
 			return err
 		}
@@ -245,8 +232,7 @@ func hmaCrossID(c paper.Cross) string {
 }
 
 // postHMANears posts each near-HMA pullback not yet posted, in the thread of
-// its up-cross when that message's ts is known, with the order buttons while
-// the minute is fresh.
+// its up-cross when that message's ts is known.
 func postHMANears(ctx context.Context, client *slack.Client, channel string, st *paperDayState, cfg paper.CrossConfig,
 	nears []paper.Near, now time.Time, sentPath, tsPath string) error {
 	if len(nears) == 0 {
@@ -260,7 +246,6 @@ func postHMANears(ctx context.Context, client *slack.Client, channel string, st 
 	if _, err := readJSONFile(tsPath, &tss); err != nil {
 		return err
 	}
-	buttons := os.Getenv("SLACK_ORDER_USERS") != ""
 	for _, n := range nears {
 		id := "near|" + hmaCrossID(n.Cross)
 		if sent[id] {
@@ -272,11 +257,6 @@ func postHMANears(ctx context.Context, client *slack.Client, channel string, st 
 			continue
 		}
 		blocks := []slack.Block{slack.SectionBlock(text)}
-		if buttons && now.Sub(n.Time.Add(time.Minute)) <= hmaCrossMaxAge {
-			if row := hmaCrossButtons(st, n.Cross); row != nil {
-				blocks = append(blocks, row)
-			}
-		}
 		if ts := tss[hmaCrossID(n.Cross)]; ts != "" {
 			err = client.ReplyBlocks(ctx, channel, ts, text, blocks)
 		} else {
@@ -307,110 +287,6 @@ func hmaCrossText(c paper.Cross, cfg paper.CrossConfig) string {
 	return fmt.Sprintf("%s *%s* %s crossed %s · %dm HMA%d %.2f %s HMA%d %.2f · close ₹%s · bar %s–%s",
 		emoji, paper.HMACrossName, paperName(c.Instrument), word, cfg.TF, cfg.Fast, c.Fast, rel, cfg.Slow, c.Slow, c.Close,
 		c.Time.In(market.IST).Format("15:04"), c.End.In(market.IST).Format("15:04"))
-}
-
-// hmaCrossButtons is Buy CE and Buy PE of the crossing leg's strike on
-// every cross, the crossing leg's buy green on an up-cross, and on a
-// down-cross a red Sell for the crossing leg, which sells what is held of it.
-func hmaCrossButtons(st *paperDayState, c paper.Cross) slack.Block {
-	var bs []manual.OrderButton
-	var sell *manual.OrderButton
-	for _, l := range st.Legs {
-		if market.Rupees(st.legStrike(l)) != c.Instrument.Strike {
-			continue
-		}
-		r := string(l.Right)
-		b := manual.OrderButton{Order: manual.FutOrder{Strategy: paper.HMACrossName, Side: market.Buy, Symbol: l.Symbol},
-			Text:    "Buy " + r,
-			Confirm: fmt.Sprintf("*BUY 1 lot (%d qty) %s* on Zerodha at market (MIS), for %s.", st.Lot, l.Symbol, paper.HMACrossName)}
-		if l.Right == c.Instrument.Right {
-			if c.Up {
-				b.Style = "primary"
-			} else {
-				sell = &manual.OrderButton{Order: manual.FutOrder{Strategy: paper.HMACrossName, Side: market.Sell, Symbol: l.Symbol},
-					Text: "Sell " + r, Style: "danger",
-					Confirm: fmt.Sprintf("*SELL all the MIS %s you hold* on Zerodha at market, for %s.", l.Symbol, paper.HMACrossName)}
-			}
-		}
-		bs = append(bs, b)
-	}
-	if len(bs) == 0 {
-		return nil
-	}
-	if sell != nil {
-		bs = append(bs, *sell)
-	}
-	return manual.OrderButtons(bs...)
-}
-
-// hmaCrossLegSymbol is the Kite symbol of the leg c crossed on.
-func hmaCrossLegSymbol(st *paperDayState, c paper.Cross) string {
-	if l := st.legOf(c.Instrument); l != nil {
-		return l.Symbol
-	}
-	return ""
-}
-
-// optBroker is the part of Kite placeOpt uses, so tests can fake it.
-type optBroker interface {
-	Instruments(ctx context.Context, exchange string) ([]kite.Instrument, error)
-	Positions(ctx context.Context) ([]kite.Position, error)
-	PlaceOrder(ctx context.Context, o kite.OrderRequest) (string, error)
-	OrderStatus(ctx context.Context, id string) (kite.Order, error)
-}
-
-// placeOpt places an hma_crossover button's order on Zerodha, at market,
-// MIS: a buy is one lot of an unexpired NIFTY (NFO) or SENSEX (BFO) option, a
-// sell is all of the MIS quantity held long in it. A dry run stops before the
-// order.
-func placeOpt(ctx context.Context, kc optBroker, o manual.FutOrder, now time.Time, dryRun bool) (string, error) {
-	x := hmaIndexOf(o.Symbol)
-	exch := string(x.Exchange)
-	ins, err := kc.Instruments(ctx, exch)
-	if err != nil {
-		return "", fmt.Errorf("kite %s instruments: %w", exch, err)
-	}
-	today := market.DateOf(now.In(market.IST))
-	var inst *kite.Instrument
-	for i := range ins {
-		in := &ins[i]
-		if in.Symbol == o.Symbol && in.Name == x.Name && (in.Type == "CE" || in.Type == "PE") && !in.Expiry.Before(today) {
-			inst = in
-			break
-		}
-	}
-	if inst == nil {
-		return "", fmt.Errorf("%s isn't a live %s option on Kite", o.Symbol, x.Name)
-	}
-	side, qty := "BUY", inst.LotSize
-	if o.Side == market.Sell {
-		side = "SELL"
-		ps, err := kc.Positions(ctx)
-		if err != nil {
-			return "", fmt.Errorf("kite positions: %w", err)
-		}
-		qty = 0
-		for _, p := range ps {
-			if p.Exchange == exch && p.Symbol == o.Symbol && p.Product == "MIS" {
-				qty += p.Qty
-			}
-		}
-		if qty <= 0 {
-			return "", fmt.Errorf("no MIS %s held on Zerodha; nothing sold", o.Symbol)
-		}
-		if qty > x.Freeze {
-			return "", fmt.Errorf("%d %s held is over the %d freeze quantity; sell it on Kite", qty, o.Symbol, x.Freeze)
-		}
-	}
-	if dryRun {
-		return fmt.Sprintf(":test_tube: dry run: would %s %d %s on Zerodha (MARKET, MIS) for %s; nothing placed", side, qty, o.Symbol, o.Strategy), nil
-	}
-	id, err := kc.PlaceOrder(ctx, kite.OrderRequest{Exchange: exch, Symbol: o.Symbol, Side: side, Type: "MARKET", Product: "MIS",
-		Qty: qty, Tag: "slack" + now.In(market.IST).Format("0102150405")})
-	if err != nil {
-		return "", err
-	}
-	return awaitFill(ctx, kc, id, fmt.Sprintf("%s %d %s on Zerodha (order %s)", side, qty, o.Symbol, id))
 }
 
 // awaitFill waits up to half a minute for order id to fill and says how it went.

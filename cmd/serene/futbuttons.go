@@ -15,7 +15,6 @@ import (
 	"serene/internal/kite"
 	"serene/internal/manual"
 	"serene/internal/market"
-	"serene/internal/paper"
 	"serene/internal/slack"
 )
 
@@ -84,10 +83,6 @@ func futButtons(cl *clients, logf func(string, ...any), dryRun bool) (*manual.Sl
 			kc, err := cl.zerodha(ctx)
 			if err != nil {
 				return "", err
-			}
-			switch o.Strategy {
-			case paper.HMACrossName, paper.HMACrossOldName:
-				return placeOpt(ctx, kc, o, time.Now(), dryRun)
 			}
 			return placeFut(ctx, kc, o, time.Now(), dryRun)
 		}}, nil

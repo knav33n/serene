@@ -14,9 +14,6 @@ import (
 // SENSEX was added on 2026-11-26.
 const HMACrossName = "hma_crossover"
 
-// HMACrossOldName is the name on buttons posted before 2026-11-26.
-const HMACrossOldName = "nifty_hma_crossover"
-
 // CrossConfig sets hma_crossover's rules.
 type CrossConfig struct {
 	Day        market.Date
