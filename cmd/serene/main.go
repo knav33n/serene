@@ -102,13 +102,12 @@ const usage = `serene researches and trades Indian index options.
 
   serene backup               [--dry-run] [--config configs/backup.yaml]   (mirror data/ and ~/INSIGHTS onto the Seagate drive; run at end of day)
 
-  serene paper hmacross       [--slack [--fyers] [--zerodha]] [--date DATE] [--warm 4] [--sizes]   (hma_crossover: 10m HMA 13/34 up-crosses of the ATM NIFTY and SENSEX CE/PE, with Zerodha buttons; --fyers/--zerodha buy the first 2 near-HMA pullbacks of each index a day, sold at +2%; --sizes prints what each broker would buy now)
   serene slack delete         --channel NAME [--yes]   (delete the app's own messages and thread replies in a channel; counts only without --yes)
 
 Not built yet:
   serene forward signals      [--fetch] [--slack] [--strategies goldm_ema_15m,goldm_hma_1h,silverm_ema_15m,silverm_hma_1h,ema_cross_first]   (new forward-test entries/exits, no P&L)
   serene forward buttons-test [--strategy goldm_hma_1h] [--side buy] [--channel ID]   (post a test futures button; click them against serene manual --slack --slack-dry-run)
-  serene paper ticks          [--dir data/ticks] [--paper data/paper]   (long-running: Kite full-mode ticks of hma_crossover's watched contracts, 09:14–15:31 on trading days; each auto trade's window goes to Slack as a CSV when it closes)
+  serene paper ticks          [--dir data/ticks] [--paper data/paper]   (long-running: Kite full-mode ticks of the ATM and ±100 NIFTY and SENSEX CE/PE, the NIFTY 50 index and NIFTY's nearest future, 09:14–15:31 on trading days, into data/ticks)
   serene live jade            [--slack] [--check] [--decide-at 15:20] [--buffer 0.02]   (NIFTY Jade Lizard, ~200 credit, 1 lot on Zerodha NRML; 50% take profit, exit at 21 days)
   serene live stbt            [--slack] [--check] [--only nifty|sensex]   (1DTE ATM straddles, STBT: NIFTY 13:00 W&T −5 / SENSEX 11:00 W&T −10, SL 40% trail 20/10, re-entry at cost; 1 lot each on Zerodha NRML)
   serene live mcx             [--slack] [--check] [--strategies goldm_hmasma_10m,silverm_hmasma_10m] [--min-days 20] [--channel C0CH2BZU202]   (10m HMA34/SMA89 cross, one lot each on Zerodha NRML, from the next cross)
@@ -275,8 +274,6 @@ func run(ctx context.Context, args []string) error {
 		return runForwardSignals(ctx, rest)
 	case "slack delete":
 		return runSlackDelete(ctx, rest)
-	case "paper hmacross":
-		return runHMACross(ctx, rest)
 	case "paper ticks":
 		return runTicks(ctx, rest)
 	case "live jade":

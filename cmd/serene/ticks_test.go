@@ -63,3 +63,24 @@ func TestTickFixed(t *testing.T) {
 		t.Errorf("index path %s", p)
 	}
 }
+
+// TestTickDayPath: the recorder keeps hma_crossover's day-file names, so a
+// day it already chose (or one hma_crossover wrote) is read, not rechosen.
+func TestTickDayPath(t *testing.T) {
+	d := market.Date{Year: 2026, Month: time.November, Day: 27}
+	if p := tickDayPath("data/paper", tickIndices[0], d); p != "data/paper/day-2026-11-27.json" {
+		t.Errorf("NIFTY %s", p)
+	}
+	if p := tickDayPath("data/paper", tickIndices[1], d); p != "data/paper/day-SENSEX-2026-11-27.json" {
+		t.Errorf("SENSEX %s", p)
+	}
+	dir := t.TempDir()
+	want := tickDayState{Day: d, Index: "SENSEX", Strike: 85000, Legs: []tickLeg{{Right: market.Call, Token: 7, Symbol: "SENSEX25DEC85000CE", Strike: 85000}}}
+	if err := writeJSONFile(tickDayPath(dir, tickIndices[1], d), want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tickContracts(d, dir)
+	if err != nil || len(got) != 1 || got[7].quote != "BFO:SENSEX25DEC85000CE" {
+		t.Errorf("contracts %+v %v", got, err)
+	}
+}

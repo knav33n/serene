@@ -16,19 +16,16 @@ import (
 	"serene/internal/market"
 )
 
-// The tick recorder (user, 2026-11-26: "start recording tick data for the
-// contract traded … I need this to figure out SL"): a long-running service
-// that, on NSE trading days from 09:14 to 15:31, streams Kite's full-mode
-// ticks of every contract hma_crossover watches (the day files in
-// data/paper, ATM and ±100 CE/PE of each index) into
-// data/ticks/<day>/<EXCHANGE>_<SYMBOL>.csv. Every watched contract is
-// recorded from when hma_crossover writes the day file (its 09:16:20 run,
-// after the 09:15 bar closes; no guessing strikes before the open, user
-// 2026-11-27), so a trade's file already holds the ticks before its buy.
-// Nothing goes to Slack (user, 2026-11-27): the files stay on hearth.
-// Every day it also records the NIFTY 50 index and NIFTY's nearest
-// unexpired future (user, 2026-11-27) from when it connects, 09:14; an
-// index row has only recv_time, exch_time and ltp.
+// The tick recorder (user, 2026-11-26: "start recording tick data … I need
+// this to figure out SL"; kept when hma_crossover was deleted, 2026-11-27):
+// a long-running service that, on NSE trading days from 09:14 to 15:31,
+// streams Kite's full-mode ticks into data/ticks/<day>/<EXCHANGE>_<SYMBOL>.csv
+// of the nearest-expiry ATM and ±100 CE/PE of NIFTY and SENSEX (tickDay:
+// strikes from the 09:15 open, so recorded from about 09:16, no guessing
+// before the open, user 2026-11-27), plus the NIFTY 50 index and NIFTY's
+// nearest unexpired future from when it connects, 09:14. An index row has
+// only recv_time, exch_time and ltp. Nothing goes to Slack: the files stay
+// on hearth.
 const (
 	tickStart = 9*60 + 14
 	tickEnd   = 15*60 + 31
@@ -43,7 +40,7 @@ const tickTimeFmt = "2006-01-02 15:04:05.000"
 func runTicks(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("paper ticks", flag.ContinueOnError)
 	dir := fs.String("dir", "data/ticks", "where the day's tick files go")
-	paperDir := fs.String("paper", "data/paper", "hma_crossover's day files: the contracts to record")
+	paperDir := fs.String("paper", "data/paper", "the day files: each index's recorded contracts, chosen at the open")
 	probe := fs.Duration("probe", 0, "connect now, subscribe to the NIFTY 50 index (token 256265) and the latest day files' contracts, print what comes for this long, record nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -76,16 +73,12 @@ func runTicks(ctx context.Context, args []string) error {
 // tickContract is a recorded contract: Kite's EXCHANGE:SYMBOL.
 type tickContract struct{ quote string }
 
-// tickContracts is the day's watched contracts by Kite token.
+// tickContracts is the day files' contracts by Kite token.
 func tickContracts(d market.Date, paperDir string) (map[int64]tickContract, error) {
 	out := map[int64]tickContract{}
-	for _, x := range hmaIndices {
-		name := "day-" + d.String() + ".json"
-		if x.Name != "NIFTY" {
-			name = "day-" + x.Name + "-" + d.String() + ".json"
-		}
-		var st paperDayState
-		ok, err := readJSONFile(filepath.Join(paperDir, name), &st)
+	for _, x := range tickIndices {
+		var st tickDayState
+		ok, err := readJSONFile(tickDayPath(paperDir, x, d), &st)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +124,7 @@ type tickFile struct {
 }
 
 // recordTicks streams until the session ends or the connection fails,
-// subscribing to new day-file contracts as hma_crossover writes them.
+// subscribing to each index's options once tickDay can choose them.
 func recordTicks(ctx context.Context, d market.Date, dir, paperDir string) error {
 	kc, err := kiteClient(ctx)
 	if err != nil {
@@ -182,7 +175,19 @@ func recordTicks(ctx context.Context, d market.Date, dir, paperDir string) error
 	defer check.Stop()
 	flush := time.NewTicker(2 * time.Second)
 	defer flush.Stop()
+	chosen := map[string]bool{}
 	subscribe := func() error {
+		for _, x := range tickIndices {
+			if chosen[x.Name] {
+				continue
+			}
+			// A failed choice is retried at the next check; the other contracts keep recording.
+			if st, err := tickDay(ctx, kc, x, d, time.Now().In(market.IST), paperDir); err != nil {
+				fmt.Fprintln(os.Stderr, "ticks:", err)
+			} else if st != nil {
+				chosen[x.Name] = true
+			}
+		}
 		cs, err := tickContracts(d, paperDir)
 		if err != nil {
 			return err
@@ -330,4 +335,9 @@ func probeTicks(ctx context.Context, wait time.Duration, paperDir string) error 
 			}
 		}
 	}
+}
+
+func minuteOfDay(t time.Time) int {
+	t = t.In(market.IST)
+	return t.Hour()*60 + t.Minute()
 }

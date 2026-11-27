@@ -208,3 +208,26 @@ func runFutButtonsTest(ctx context.Context, args []string) error {
 	fmt.Println("posted the test buttons to", ch)
 	return nil
 }
+
+// awaitFill waits up to half a minute for order id to fill and says how it went.
+func awaitFill(ctx context.Context, kc interface {
+	OrderStatus(ctx context.Context, id string) (kite.Order, error)
+}, id, what string) (string, error) {
+	var st kite.Order
+	var err error
+	for range 15 {
+		if err := sleepCtx(ctx, 2*time.Second); err != nil {
+			break
+		}
+		if st, err = kc.OrderStatus(ctx, id); err != nil {
+			continue
+		}
+		switch strings.ToUpper(st.Status) {
+		case "COMPLETE":
+			return fmt.Sprintf(":white_check_mark: %s filled @ ₹%.2f", what, st.Average), nil
+		case "REJECTED", "CANCELLED":
+			return "", fmt.Errorf("%s %s: %s", what, strings.ToLower(st.Status), st.StatusMessage)
+		}
+	}
+	return fmt.Sprintf(":hourglass: %s placed; status %s after 30s, check Kite", what, st.Status), nil
+}

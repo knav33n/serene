@@ -1,5 +1,5 @@
 [Unit]
-Description=serene tick recorder: Kite full-mode ticks of hma_crossover's watched NIFTY and SENSEX contracts (ATM and ±100 CE/PE) plus the NIFTY 50 index and nearest NIFTY future, 09:14–15:31 IST on trading days, into data/ticks (nothing to Slack)
+Description=serene tick recorder: Kite full-mode ticks of the nearest-expiry ATM and ±100 NIFTY and SENSEX CE/PE (strikes from the 09:15 open) plus the NIFTY 50 index and nearest NIFTY future, 09:14–15:31 IST on trading days, into data/ticks (nothing to Slack)
 Wants=network-online.target
 After=network-online.target postgresql.service
 
