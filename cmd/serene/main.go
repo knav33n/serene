@@ -91,6 +91,7 @@ const usage = `serene researches and trades Indian index options.
   serene fyers probe          [--underlying A,B] [--config configs/fyers.yaml]   (what history Fyers really serves; saves probe.parquet)
   serene fyers lots           (NSE/BSE F&O bhavcopies -> each expiry's lot, strikes and unadjusted price; universe.csv of every F&O stock since 2018)
   serene fyers all            [--underlying A,B]   (everything: spot, then expired options and futures, indices then stocks; runs for days, waits out the daily cap and token expiry)
+  serene fyers sync           [--underlying A,B]   (lots, then all: every missing spot day and expired option/future; a Fyers login in serene auth starts it in the background)
   serene fyers index          [--underlying A,B] [--from 2017-10-01]   (1m and daily spot bars into ~/INSIGHTS/fyers)
   serene fyers backfill       [--underlying A,B] [--from DATE] [--to DATE]   (expired options and futures, 1m with OI; resumable)
   serene fyers update         [--underlying A,B]   (daily: live lot sizes, new spot days, newly expired options)
@@ -267,7 +268,7 @@ func run(ctx context.Context, args []string) error {
 		return runFyersMCXOpt(ctx, rest)
 	case "fyers mcx":
 		return runFyersMCX(ctx, rest)
-	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot", "fyers lots", "fyers all":
+	case "fyers probe", "fyers index", "fyers backfill", "fyers update", "fyers lot", "fyers lots", "fyers all", "fyers sync":
 		return runFyers(ctx, args[1], rest)
 	case "forward signals":
 		return runForwardSignals(ctx, rest)

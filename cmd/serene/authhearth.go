@@ -206,6 +206,11 @@ func afterLogin(ctx context.Context, store auth.Store, broker string, toHearth b
 	if toHearth && hearthBrokers[broker] {
 		send("hearth", func() error { return pushHearth(ctx, t) })
 	}
+	if broker == "fyers" && os.Getenv("SERENE_NO_FYERS_SYNC") == "" {
+		if err := startFyersSync(report); err != nil {
+			errs = append(errs, fmt.Errorf("fyers data: %w", err))
+		}
+	}
 	return errors.Join(errs...)
 }
 

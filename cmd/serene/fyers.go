@@ -219,7 +219,14 @@ func runFyers(ctx context.Context, sub string, args []string) error {
 	case "update":
 		return fyingest.Update(ctx, s.ingest, s.store, s.client, us, s.cfg.Segments)
 	case "all":
+		unlock, err := lockFyersAll(s.cfg.Dir)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		return runFyersAll(ctx, s, us)
+	case "sync":
+		return runFyersSync(ctx, s, *names)
 	case "lot":
 		if *names == "" || len(us) != 1 || f.IsZero() || *size <= 0 {
 			return errors.New("usage: serene fyers lot --underlying NAME --from DATE --size N")
