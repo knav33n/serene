@@ -457,3 +457,22 @@ func stbtClosed(ctx context.Context, client *slack.Client, channel string, r liv
 		fmt.Fprintln(os.Stderr, "live report:", err)
 	}
 }
+
+func sleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+func post(ctx context.Context, client *slack.Client, channel, text string) {
+	fmt.Println(text)
+	if client == nil {
+		return
+	}
+	if err := client.Post(ctx, channel, text); err != nil {
+		fmt.Fprintln(os.Stderr, "slack:", err)
+	}
+}
